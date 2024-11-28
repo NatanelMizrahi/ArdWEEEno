@@ -7,6 +7,10 @@
 // #include <SoftwareSerialTX.h>
 
 // SoftwareSerialTX BTSerial(2);
+const byte txPin = 2;
+const byte rxPin = 3;
+
+// SoftwareSerial BTSerial(rxPin, txPin);
 
 void displayFloat(char* label, float value, bool last = false);
 
@@ -29,31 +33,33 @@ float elapsedTimeSeconds, currentTime, previousTime;
 float lastPrintPreviousTime;
 float temperature;
 
-const int MPU = 0x68;  // MPU6050 I2C address
-const float ACCEL_DIVISION_FACTOR = 16384.0;  // For a range of +-2g, we need to divide the raw values by 16384, according to the datasheet
-const float GYRO_DIVISION_FACTOR = 131.0;     // For a 250deg/s range we have to divide first the raw value by 131.0, according to the datasheet
-
-const int ACCEL_CONFIG_REGISTER = 0x1C;
-const int ACCEL_CONFIG_FULL_RANGE_VAL = 0x10; // +/- 8g full scale range (default +/- 2g)
-const int GYRO_CONFIG_REGISTER = 0x1B;
-const int GYRO_CONFIG_FULL_RANGE_VAL = 0x10; // 1000deg/s full scale (default +/- 250deg/s)
-
-const bool SHOULD_USE_ACCEL_FULL_RANGE = false;
-const bool SHOULD_USE_GYRO_FULL_RANGE = false;
-
+const bool SHOULD_UPDATE_ACCEL_FULL_RANGE = true;
+const bool SHOULD_UPDATE_GYRO_FULL_RANGE = false;
 const int OFFSET_CALC_SAMPLE_SIZE = 200;
 const int DISPLAY_INTERVAL_MS = 500;
 const bool SERIAL_PLOTTER_ENABLED = true;
 
+const int MPU = 0x68;  // MPU6050 I2C address
+const float ACCEL_DIVISION_FACTOR = SHOULD_UPDATE_ACCEL_FULL_RANGE ? 8192.0 : 16384.0;  // For a range of +-2g, we need to divide the raw values by 16384, according to the datasheet
+const float GYRO_DIVISION_FACTOR = 131.0;     // For a 250deg/s range we have to divide first the raw value by 131.0, according to the datasheet
+
+const int ACCEL_CONFIG_REGISTER = 0x1C;
+const int ACCEL_CONFIG_FULL_RANGE_4G = 0x08; // +/- 4g full scale range (default +/- 2g)
+const int GYRO_CONFIG_REGISTER = 0x1B;
+const int GYRO_CONFIG_FULL_RANGE_VAL = 0x10; // 1000deg/s full scale (default +/- 250deg/s)
+
+
+
+
 void configure_sensitivity() {
-    if (SHOULD_USE_ACCEL_FULL_RANGE) {
+    if (SHOULD_UPDATE_ACCEL_FULL_RANGE) {
         Wire.beginTransmission(MPU);
         Wire.write(ACCEL_CONFIG_REGISTER);
-        Wire.write(ACCEL_CONFIG_FULL_RANGE_VAL);
+        Wire.write(ACCEL_CONFIG_FULL_RANGE_4G);
         Wire.endTransmission(true);
     }
 
-    if (SHOULD_USE_GYRO_FULL_RANGE) {
+    if (SHOULD_UPDATE_GYRO_FULL_RANGE) {
         Wire.beginTransmission(MPU);
         Wire.write(GYRO_CONFIG_REGISTER);
         Wire.write(GYRO_CONFIG_FULL_RANGE_VAL);
@@ -211,3 +217,6 @@ void calculateImuInitialValuesOffset() {
 }
 
 // TODO: ignore very small changes
+// gY oscilattes. very light is around +-15 - should be the threshold for soft ones. (configurable) 
+// ay oscilates 0 - 0.2 in very light movement - barely moving to 
+// https://youtu.be/7VW_XVbtu9k
