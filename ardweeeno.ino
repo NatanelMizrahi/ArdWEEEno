@@ -1,18 +1,11 @@
-/*
-   Arduino and MPU6050 Accelerometer and Gyroscope Sensor Tutorial
-   by Dejan, https://howtomechatronics.com
-*/
-
 #include <Wire.h>
-// #include <SoftwareSerialTX.h>
-
-// SoftwareSerialTX BTSerial(2);
-const byte txPin = 2;
-const byte rxPin = 3;
-
-// SoftwareSerial BTSerial(rxPin, txPin);
+#include <SoftwareSerial.h>
+#include <DYPlayerArduino.h>
 
 void displayFloat(char* label, float value, bool last = false);
+
+const int AUDIO_RX_PIN = 8;
+const int AUDIO_TX_PIN = 7;
 
 typedef struct {
   float X, Y, Z;
@@ -24,23 +17,45 @@ typedef struct {
   float speed;
 } state_t;
 
+typedef struct {
+  float State; 
+  float Uncertainty;
+} kalman_t;
+
+
+const int MIN_ANGLE_PROGRESS = 5;
+float ANGLE_PROGRESS_GAIN = 0.14;
+float PROGRESS_DECAY_RATE = 4.5;
+float PROGRESS_GAIN_FACTOR = 3.0;
+// 0.55,240,60
+
+const int NUM_VOICES = 3;
+const int NUM_LEVELS = 6;
+const int PLAYBACKS_PER_LEVEL[NUM_VOICES][NUM_LEVELS] = {  
+  {0,0,0,0,0,0}, // NA
+  {0,0,0,0,0,0}, // AM
+  {0,0,0,0,0,0}  // AE
+};
+
+const int AVAILABLE_VOICES_IN_DEVICE[] = {0};
+
 state_t state, prevState, offset, angle;
-
-char floatBuffer[12];
-
-float roll, pitch, yaw;
+float progressBarValue;
+float roll=0, pitch=0, yaw=0;
 float elapsedTimeSeconds, currentTime, previousTime;
 float lastPrintPreviousTime;
 float temperature;
 
-const bool SHOULD_UPDATE_ACCEL_FULL_RANGE = true;
-const bool SHOULD_UPDATE_GYRO_FULL_RANGE = false;
-const int OFFSET_CALC_SAMPLE_SIZE = 200;
-const int DISPLAY_INTERVAL_MS = 500;
+const int MAX_VOLUME = 30;
+const bool SHOULD_INCREASE_ACCEL_FULL_RANGE = true;
+const bool SHOULD_INCREASE_GYRO_FULL_RANGE = false;
 const bool SERIAL_PLOTTER_ENABLED = true;
+const bool DEBUG_PRINTS_ENABLED = false;
+const int CALIBRATION_SAMPLE_SIZE = 2000;
+const int DISPLAY_INTERVAL_MS = 500;
 
 const int MPU = 0x68;  // MPU6050 I2C address
-const float ACCEL_DIVISION_FACTOR = SHOULD_UPDATE_ACCEL_FULL_RANGE ? 8192.0 : 16384.0;  // For a range of +-2g, we need to divide the raw values by 16384, according to the datasheet
+const float ACCEL_DIVISION_FACTOR = SHOULD_INCREASE_ACCEL_FULL_RANGE ? 8192.0 : 16384.0;  // For a range of +-2g, we need to divide the raw values by 16384, according to the datasheet
 const float GYRO_DIVISION_FACTOR = 131.0;     // For a 250deg/s range we have to divide first the raw value by 131.0, according to the datasheet
 
 const int ACCEL_CONFIG_REGISTER = 0x1C;
@@ -48,18 +63,42 @@ const int ACCEL_CONFIG_FULL_RANGE_4G = 0x08; // +/- 4g full scale range (default
 const int GYRO_CONFIG_REGISTER = 0x1B;
 const int GYRO_CONFIG_FULL_RANGE_VAL = 0x10; // 1000deg/s full scale (default +/- 250deg/s)
 
+const int ACCELEROMETER_UNCERTAINTY_STD_DEV_DEGREES = 3;
+const int ANGLE_UNCERTAINTY_STD_DEV_DEGREES = 2;
+const int ACCELEROMETER_STD_DEV_DEGREES = 3;
+const int GYRO_ERROR_STD_DEV_DEG_PER_SEC = 4;
 
+const float KALMAN_INITIAL_ANGLE_STATE = 0; // swing starts in a mostly leveled surface
+const float KALMAN_INITAL_ANGLE_UNCERTAINTY = ANGLE_UNCERTAINTY_STD_DEV_DEGREES * ANGLE_UNCERTAINTY_STD_DEV_DEGREES; // but allowing for some error
 
+kalman_t kalmanRoll = {KALMAN_INITIAL_ANGLE_STATE, KALMAN_INITAL_ANGLE_UNCERTAINTY};
+kalman_t kalmanPitch = {KALMAN_INITIAL_ANGLE_STATE, KALMAN_INITAL_ANGLE_UNCERTAINTY};
+
+kalman_t kalmanFilter(
+  kalman_t kalman, 
+  float kalmanInputGyroRate, 
+  float kalmanMeasurementAccelAngle, 
+  float elapsedTimeSeconds) 
+{
+  float dt = elapsedTimeSeconds;
+  kalman.State = kalman.State + dt * kalmanInputGyroRate;
+  kalman.Uncertainty = kalman.Uncertainty + pow(dt, 2) * pow(GYRO_ERROR_STD_DEV_DEG_PER_SEC, 2);
+
+  float kalmanGain = kalman.Uncertainty * 1 / (1 * kalman.Uncertainty + pow(ACCELEROMETER_STD_DEV_DEGREES, 2));
+  kalman.State = kalman.State + kalmanGain * (kalmanMeasurementAccelAngle - kalman.State);
+  kalman.Uncertainty = (1 - kalmanGain) * kalman.Uncertainty;
+  return { kalman.State, kalman.Uncertainty };
+}
 
 void configure_sensitivity() {
-    if (SHOULD_UPDATE_ACCEL_FULL_RANGE) {
+    if (SHOULD_INCREASE_ACCEL_FULL_RANGE) {
         Wire.beginTransmission(MPU);
         Wire.write(ACCEL_CONFIG_REGISTER);
         Wire.write(ACCEL_CONFIG_FULL_RANGE_4G);
         Wire.endTransmission(true);
     }
 
-    if (SHOULD_UPDATE_GYRO_FULL_RANGE) {
+    if (SHOULD_INCREASE_GYRO_FULL_RANGE) {
         Wire.beginTransmission(MPU);
         Wire.write(GYRO_CONFIG_REGISTER);
         Wire.write(GYRO_CONFIG_FULL_RANGE_VAL);
@@ -69,7 +108,33 @@ void configure_sensitivity() {
     delay(20);
 }
 
+int selectRandomVoice() {
+  int arraySize = sizeof(AVAILABLE_VOICES_IN_DEVICE) / sizeof(AVAILABLE_VOICES_IN_DEVICE[0]);
+  int randomIndex = random(0, arraySize);
+  int randomValue = AVAILABLE_VOICES_IN_DEVICE[randomIndex]; 
+  return randomValue;
+}
+
+void play(String voice, String file) {
+  String pathString = "/" + voice + "/" + file + ".mp3";
+  const char* path = pathString.c_str();
+  if (player.checkPlayState() != DY::PlayState::Playing) {
+    player.playSpecifiedDevicePath(DY::Device::Sd, path);
+  }
+}
+
+void playSound(){
+  int level = floor(progressBarValue/100 * NUM_LEVELS);
+
+  play("0", "1_2");
+}
+void configurePlayer() {
+  player.begin();
+  player.setVolume(MAX_VOLUME); // 50% Volume
+}
+
 void configureIMU() {
+  Wire.setClock(400000);
   Wire.begin();                 // Initialize comunication
   Wire.beginTransmission(MPU);  // Start communication with MPU6050 // MPU=0x68
   Wire.write(0x6B);             // Talk to the register 6B
@@ -77,9 +142,11 @@ void configureIMU() {
   Wire.endTransmission(true);   //end the transmission
 
   configure_sensitivity();
-  calculateImuInitialValuesOffset();
+  calibrateImu();
 }
+
 void displayFloat(char* label, float value, bool last) {
+  static char floatBuffer[12];
   if (SERIAL_PLOTTER_ENABLED) {
     Serial.print(label);
     Serial.print(":");
@@ -88,7 +155,7 @@ void displayFloat(char* label, float value, bool last) {
       Serial.println();
     else
       Serial.print(",");
-  } else {
+  } else if (DEBUG_PRINTS_ENABLED) {
     dtostrf(value, 6, 2, floatBuffer);
     Serial.print(" | ");
     Serial.print(label);
@@ -99,26 +166,21 @@ void displayFloat(char* label, float value, bool last) {
   }
 }
 
-void sendMeasurements(state_t s) {
-  float values[9] = { roll, pitch, yaw, s.Acc.X, s.Acc.Y, s.Acc.Z, s.Gyro.X, s.Gyro.Y, s.Gyro.Z };
-  // BTSerial.write((uint8_t*)values, sizeof(values));
-}
-
 void displayState() {
   if (SERIAL_PLOTTER_ENABLED || millis() - lastPrintPreviousTime > DISPLAY_INTERVAL_MS) {
     lastPrintPreviousTime = millis();
-    displayFloat("r", roll);
+    // displayFloat("r", roll);
     displayFloat("p", pitch);
-    displayFloat("y", yaw);
+    // displayFloat("y", yaw);
+    displayFloat("$", progressBarValue);
     displayMeasurements(state);
-    sendMeasurements(state);
   }
 }
 
 void setup() {
   Serial.begin(9600);
-  // BTSerial.begin(9600);
   configureIMU();
+  configurePlayer();
   delay(20);
 }
 
@@ -147,12 +209,48 @@ void readImuData() {
   state.Gyro.Z = readFloat() / GYRO_DIVISION_FACTOR;
 }
 
+void readProgressRates() {
+  if (Serial.available() > 0) {
+    float newValue;
+    newValue = Serial.parseFloat();
+    if (newValue > 0) ANGLE_PROGRESS_GAIN = newValue;
+    
+    Serial.read(); // skip delimiter
+    newValue = Serial.parseFloat();
+    if (newValue > 0) PROGRESS_DECAY_RATE = newValue;
+
+    Serial.read(); // skip delimiter
+    newValue = Serial.parseFloat();
+    if (newValue > 0) PROGRESS_GAIN_FACTOR = newValue;
+  }
+}
+
+const int AUDIO_START_DELAY_MS = 3;
+bool shouldUpdateProgress() {
+  if (abs(pitch) < MIN_ANGLE_PROGRESS) 
+    return false;
+  // float startTime = millis();
+  // if (millis() - startTime < AUDIO_START_DELAY_MS) {
+  //   //TODO
+  // }
+ 
+}
+void updateProgressBar() {
+  if (!shouldUpdateProgress()) return;
+  float newValue = progressBarValue + pow(abs(pitch), ANGLE_PROGRESS_GAIN) / PROGRESS_GAIN_FACTOR - PROGRESS_DECAY_RATE;
+  progressBarValue = constrain(newValue, 0.0, 100.0); 
+}
+
 void loop() {
   previousTime = currentTime;
   currentTime = millis();
   elapsedTimeSeconds = (currentTime - previousTime) / 1000;
-
   readImuData();
+
+  // Correct the accelerometer outputs with the calculated offset values
+  // state.Acc.X = state.Acc.X - offset.Acc.X;
+  // state.Acc.Y = state.Acc.Y - offset.Acc.Y;
+  // state.Acc.Z = state.Acc.Z - offset.Acc.Z;
 
   // Calculating Roll and Pitch from the accelerometer data with the calculated offset values
   angle.Acc.X = (atan(state.Acc.Y / sqrt(pow(state.Acc.X, 2) + pow(state.Acc.Z, 2))) * 180 / PI) - offset.Acc.X;
@@ -168,28 +266,36 @@ void loop() {
   angle.Gyro.Y = angle.Gyro.Y + state.Gyro.Y * elapsedTimeSeconds;
 
   // Complementary filter - combine acceleromter and gyro angle values
-  yaw = yaw + state.Gyro.Z * elapsedTimeSeconds;
-  roll = 0.96 * angle.Gyro.X + 0.04 * angle.Acc.X;
-  pitch = 0.96 * angle.Gyro.Y + 0.04 * angle.Acc.Y;
+  // yaw = yaw + state.Gyro.Z * elapsedTimeSeconds; 
+  // roll = 0.96 * angle.Gyro.X + 0.04 * angle.Acc.X;
+  // pitch = 0.96 * angle.Gyro.Y + 0.04 * angle.Acc.Y;
 
+  kalmanRoll = kalmanFilter(kalmanRoll, state.Gyro.X, angle.Acc.X, elapsedTimeSeconds);
+  kalmanPitch = kalmanFilter(kalmanPitch, state.Gyro.Y, angle.Acc.Y, elapsedTimeSeconds);
+  roll = kalmanRoll.State;
+  pitch = kalmanPitch.State;
+  yaw = yaw + state.Gyro.Z * elapsedTimeSeconds;   // can't use kalman filter for yaw
+
+  readProgressRates();
+  updateProgressBar();
+  playSound();
   displayState();
 }
 
 void displayMeasurements(state_t s) {
-  displayFloat("aX", s.Acc.X);
-  displayFloat("aY", s.Acc.Y);
-  displayFloat("aZ", s.Acc.Z);
-  displayFloat("gX", s.Gyro.X);
-  displayFloat("gY", s.Gyro.Y);
-  displayFloat("gZ", s.Gyro.Z);
-  displayFloat("v", s.speed, true);
+  // displayFloat("aX", s.Acc.X);
+  // displayFloat("aY", s.Acc.Y);
+  // displayFloat("aZ", s.Acc.Z);
+  // displayFloat("gX", s.Gyro.X);
+  // displayFloat("gY", s.Gyro.Y);
+  // displayFloat("gZ", s.Gyro.Z);
+  Serial.println("");
 }
 
-void calculateImuInitialValuesOffset() {
-  // Note that we should place the IMU flat in order to get the correct values.
+void calibrateImu() {
+  // Note that we should place the IMU flat in order to get the correct values.   
 
-  // Read accelerometer values OFFSET_CALC_SAMPLE_SIZE times
-  for (int i = 0; i < OFFSET_CALC_SAMPLE_SIZE; i++) {
+  for (int i = 0; i < CALIBRATION_SAMPLE_SIZE; i++) {
     readImuData();
 
     // Sum all readings
@@ -201,16 +307,16 @@ void calculateImuInitialValuesOffset() {
     offset.Gyro.Z = offset.Gyro.Z + state.Gyro.Z;
   }
 
-  // Calculate the average to get the offset value
-  offset.Acc.X = offset.Acc.X / OFFSET_CALC_SAMPLE_SIZE;
-  offset.Acc.Y = offset.Acc.Y / OFFSET_CALC_SAMPLE_SIZE;
+  // Calculate the average to get the offset value and calibrate
+  offset.Acc.X = offset.Acc.X / CALIBRATION_SAMPLE_SIZE;
+  offset.Acc.Y = offset.Acc.Y / CALIBRATION_SAMPLE_SIZE;
 
-  offset.Gyro.X = offset.Gyro.X / OFFSET_CALC_SAMPLE_SIZE;
-  offset.Gyro.Y = offset.Gyro.Y / OFFSET_CALC_SAMPLE_SIZE;
-  offset.Gyro.Z = offset.Gyro.Z / OFFSET_CALC_SAMPLE_SIZE;
+  offset.Gyro.X = offset.Gyro.X / CALIBRATION_SAMPLE_SIZE;
+  offset.Gyro.Y = offset.Gyro.Y / CALIBRATION_SAMPLE_SIZE;
+  offset.Gyro.Z = offset.Gyro.Z / CALIBRATION_SAMPLE_SIZE;
 
   if (!SERIAL_PLOTTER_ENABLED) {
-    Serial.println("******* OFFSET VALUES *******");
+    Serial.println("******* CALIBRATION OFFSET VALUES *******");
     displayMeasurements(offset);
     Serial.println("****************************");
   }
@@ -219,4 +325,10 @@ void calculateImuInitialValuesOffset() {
 // TODO: ignore very small changes
 // gY oscilattes. very light is around +-15 - should be the threshold for soft ones. (configurable) 
 // ay oscilates 0 - 0.2 in very light movement - barely moving to 
-// https://youtu.be/7VW_XVbtu9k
+// periodic re-calibration
+/*
+    NOTES:
+    * used this video/repo as a reference https://youtu.be/7VW_XVbtu9k 
+    * using Kalman filter to improve angle calculation accuracy due to gyro drift
+    *
+*/
