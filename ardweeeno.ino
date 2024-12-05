@@ -423,12 +423,44 @@ void checkAndProcessReset() {
 bool shouldPlaySound() {
   if (millis() < resetTimeMs)
     return false;
+  if ((level == 0) && (abs(pitch) < MIN_ANGLE_PROGRESS))
+    return false;
   if (swingDirectionChange == NO_DIRECTION_CHANGE)
     return false;
-  // TODO: check performance when connected
   if (shouldCheckIsPlaying && player.checkPlayState() == DY::PlayState::Playing)
     return false;
   return true;
+}
+
+void shuffle(int arr[], int length) {
+  randomSeed(analogRead(5));  // Seed the random number generator with noise from an unconnected analog pin
+  for (int i = length - 1; i > 0; i--) {
+    int j = random(0, i + 1);
+    int temp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = temp;
+  }
+}
+
+// this function ensures all voices in each level are sampled before repeating for maximal variability
+int getLevelRandomPermutationIndex(int level) {
+  static int permutation[20];
+  static int numLevelOptions;
+  static int currentIndex;
+  static int currentLevel = -1;
+  
+  currentIndex++;
+  if (level != currentLevel || currentIndex == numLevelOptions) {
+    numLevelOptions = PLAYBACKS_PER_LEVEL[selectedVoice][level];
+    for (int i = 0; i < numLevelOptions; i++) {
+      permutation[i] = i;
+    }
+    shuffle(permutation, numLevelOptions);
+    currentIndex = 0;
+    currentLevel = level;
+  }
+
+  return permutation[currentIndex];
 }
 
 void play(int voice, int level, int index) {
@@ -442,8 +474,7 @@ void playSound() {
   if (!shouldPlaySound())
     return;
 
-  int numChoices = PLAYBACKS_PER_LEVEL[selectedVoice][level];
-  int randomPlaybackIndex = random(0, numChoices);
+  int randomPlaybackIndex = getLevelRandomPermutationIndex(level);
   play(selectedVoice, level, randomPlaybackIndex);
   playedMaxLevel = (level == (NUM_LEVELS - 1));
 }
