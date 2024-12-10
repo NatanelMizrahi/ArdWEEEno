@@ -1,8 +1,3 @@
-// 0.8,1.5,8,30,5000,5,1;
-// 0.6,2.8,2.3,50,5000,5,1;
-// 0.52,1.7,2.8,50,10000,5,1;
-// 0.55,0.5,2.8,0.12,50,10000,5,1;
-// 0.55,0.53,2.8,0.12,50,10000,5,1;
 #include <Wire.h>
 #include <SoftwareSerial.h>
 #include <DYPlayerArduino.h>
@@ -33,19 +28,22 @@ typedef struct {
 }
 kalman_t;
 
+// ** CONFIGURABLE PARAMETERS **
+
 // Progress gain parameters
-float RESET_PROGRESS_DELAY_MS = 10000.0;
-float MIN_ANGLE_PROGRESS = 7.0;
 float ANGLE_PROGRESS_GAIN = 0.55; 
 float PROGRESS_DECAY_RATE = 0.53;
 float PROGRESS_GAIN_FACTOR = 2.8;
 float PROGRESS_DECAY_LEVEL_EXP = 0.12;
-// 0.14, 3.3, 0.4, 0.04
-// 0.1,0.4,3.3
-// 0.44,1,3.3
-//0.55,1.2,4
-// 0.8,1.5,8,50
-// 0.55,0.53,2.8,0.12,50,10000,5,1;
+float VOLUME;
+float RESET_PROGRESS_DELAY_MS = 4000.0;
+float MIN_ANGLE_PROGRESS = 7.0;
+float shouldPlayOnForwardOnly = 1.0;
+float D_PITCH_UPDATE_NOISE_THRESHOLD = 0.015;
+float IS_IDLE_CHECK_INTERVAL_MS = 30000;
+
+// 0.55,0.53,2.8,0.12,4000.0,7.0,1.0,0.015,10000
+// ******************************
 
 // audio constants 
 int AVAILABLE_VOICES_IN_DEVICE[3] = {0,0,0};
@@ -62,7 +60,6 @@ const int PLAYBACKS_PER_LEVEL[NUM_VOICES][MAX_LEVELS] = {
   {0,0,0,0,0,0,0} // A  
 };
 
-float VOLUME;
 int selectedVoice, numLevelsForVoice;
 float currentVolume;
 int level;
@@ -77,7 +74,6 @@ float temperature;
 
 // UX configuration
 float availableVoicesVector;
-float shouldPlayOnForwardOnly = 1.0;
 const bool SHOULD_INCREASE_ACCEL_FULL_RANGE = true;
 const bool SHOULD_INCREASE_GYRO_FULL_RANGE = false;
 const bool SERIAL_PLOTTER_ENABLED = true;
@@ -120,6 +116,7 @@ float dPitch, previousDPitch, previousPitch;
 
 bool playedInLevel;
 float resetTimeMs;
+float maxPitchAngle;
 long winTimeMs;
 
 enum direction_change_e {
@@ -129,6 +126,7 @@ enum direction_change_e {
 }
 swingDirectionChange = NO_DIRECTION_CHANGE;
 bool passedMinPoint;
+bool isSwinging;
 
 float* configurableParameters[] = {
   &ANGLE_PROGRESS_GAIN,
@@ -138,15 +136,15 @@ float* configurableParameters[] = {
   &VOLUME,
   &RESET_PROGRESS_DELAY_MS,
   &MIN_ANGLE_PROGRESS,
-  &shouldPlayOnForwardOnly
+  &shouldPlayOnForwardOnly,
+  &D_PITCH_UPDATE_NOISE_THRESHOLD,
+  &IS_IDLE_CHECK_INTERVAL_MS
 };
 
 void updateSwingDirection() {
-  // if(!shouldUpdateProgress())
-
-  //   return;
   float currentTimeMs = millis();
   swingDirectionChange = NO_DIRECTION_CHANGE;
+  isSwinging = maxPitchAngle >= MIN_ANGLE_PROGRESS;
 
   // calculate the pitch angle derivative using the time average value in the current time window vs the previous time window and the time delta between the windows.
   if (currentTimeMs - previousDerivativeUpdateTimeMs > DERIVATIVE_CALC_TIME_WINDOW_MS) {
@@ -154,8 +152,14 @@ void updateSwingDirection() {
     previousDerivativeUpdateTimeMs = currentTimeMs;
     pitchSampleCount = (pitchSampleCount == 0) ? 1 : pitchSampleCount; // 0 div protection
     float currentWindowPitchAvg = pitchSampleSum / pitchSampleCount;
-    dPitch = (currentWindowPitchAvg - previousWindowPitchAvg) / dt;
-    previousWindowPitchAvg = currentWindowPitchAvg;
+    float newDPitch = (currentWindowPitchAvg - previousWindowPitchAvg) / dt;
+
+    // only update angle derivative above a defined threshold to reduce noise in change direction calculations
+    bool shouldUpdateDPitch = abs(newDPitch) > D_PITCH_UPDATE_NOISE_THRESHOLD;
+    if (shouldUpdateDPitch) {
+      dPitch = newDPitch;
+    }
+    previousWindowPitchAvg = currentWindowPitchAvg;  
     if (previousDPitch < 0 && dPitch >= 0) {
       swingDirectionChange = FORWARD;
     }
@@ -165,9 +169,12 @@ void updateSwingDirection() {
     passedMinPoint = (previousPitch <= 0 && pitch >= 0) || (previousPitch >= 0 && pitch <= 0);
 
     previousPitch = pitch;
-    previousDPitch = dPitch;
     pitchSampleSum = 0;
     pitchSampleCount = 0;
+    
+    if (shouldUpdateDPitch) {
+      previousDPitch = dPitch;
+    }
   }
   pitchSampleSum += pitch;
   pitchSampleCount++;
@@ -213,9 +220,8 @@ void displayMeasurements(state_t s) {
 
 
 void checkShouldRecalibrateIMU() {
-  // if barely moved for 30 seconds, recailbrate to remove angle drift errors
-  const int CALIBRATION_INTERVAL_MS = 30000;
-  const int CALIBRATION_MAX_ANGLE_DELTA = 1.5;
+  // if idle (barely moved) for 30 seconds, recailbrate to remove angle drift errors
+  const int IS_IDLE_CHECK_MAX_ANGLE_DELTA = 1.5;
   static float maxPitchInInterval, minPitchInInterval;
   static long nextSampleTimeMs;
 
@@ -223,10 +229,13 @@ void checkShouldRecalibrateIMU() {
   minPitchInInterval = min(minPitchInInterval, pitch);
 
   if (millis() >= nextSampleTimeMs) {
-    nextSampleTimeMs = millis() + CALIBRATION_INTERVAL_MS;
-    if ((maxPitchInInterval - minPitchInInterval) < CALIBRATION_MAX_ANGLE_DELTA) {
+    if ((maxPitchInInterval - minPitchInInterval) < IS_IDLE_CHECK_MAX_ANGLE_DELTA) {
       calibrateImu();
+      doReset();
     }
+    nextSampleTimeMs = millis() + IS_IDLE_CHECK_INTERVAL_MS;
+    maxPitchInInterval = pitch;
+    minPitchInInterval = pitch;
   }
 }
 
@@ -351,23 +360,6 @@ void readImuData() {
   state.Gyro.Z = readFloat() / GYRO_DIVISION_FACTOR;
 }
 
-// void readParameters() {
-//   if (Serial.available() > 0) {
-//     float newValue;
-
-//     newValue = Serial.parseFloat();
-//     if (newValue > 0) ANGLE_PROGRESS_GAIN = newValue;
-
-//     Serial.read(); // skip delimiter
-//     newValue = Serial.parseFloat();
-//     if (newValue > 0) PROGRESS_DECAY_RATE = newValue;
-
-//     Serial.read(); // skip delimiter
-//     newValue = Serial.parseFloat();
-//     if (newValue > 0) PROGRESS_GAIN_FACTOR = newValue;
-//   }
-// }
-
 void readParameters() {
   if (Serial.available() == 0) 
     return;
@@ -446,6 +438,8 @@ void measureAngles() {
   roll = kalmanRoll.State;
   pitch = kalmanPitch.State;
   yaw = yaw + state.Gyro.Z * elapsedTimeSeconds; // can't use kalman filter for yaw
+
+  maxPitchAngle = max(maxPitchAngle, abs(pitch));
 }
 
 bool shouldUpdateProgress() {
@@ -459,7 +453,7 @@ bool shouldUpdateProgress() {
 void runProgressBarErrorCorrection() {
   // if stuck due to serial error, reset progress
   if (progressBarValue == 100 && (millis() - winTimeMs) > 5000) {
-    progressBarValue = 0;
+    doReset();
   }
 }
 
@@ -479,12 +473,22 @@ void updateProgressBar() {
   runProgressBarErrorCorrection();
 }
 
+
+void doReset() {
+  progressBarValue = 0;
+  maxPitchAngle = 0;
+  playedMaxLevel = false;
+  resetTimeMs = millis() + RESET_PROGRESS_DELAY_MS;
+  selectRandomVoice();
+}
+
 void checkAndProcessReset() {
   if (playedMaxLevel) {
-    progressBarValue = 0;
-    playedMaxLevel = false;
+    doReset();
+  }
+  
+  if (!isSwinging) {
     resetTimeMs = millis() + RESET_PROGRESS_DELAY_MS;
-    selectRandomVoice();
   }
 }
 
@@ -557,15 +561,14 @@ void loop() {
   playSound();
   displayState();
   checkAndProcessReset();
+  checkShouldRecalibrateIMU();
 }
 
-// TODO: ignore very small changes in dPitch
-// gY oscilattes. very light is around +-15 - should be the threshold for soft ones. (configurable) 
-// ay oscilates 0 - 0.2 in very light movement - barely moving to 
-// periodic re-calibration
 /*
     NOTES:
     * used this video/repo as a reference https://youtu.be/7VW_XVbtu9k 
     * using Kalman filter to improve angle calculation accuracy due to gyro drift
-    *
+    * gY oscilattes. very light is around +-15 - should be the threshold for soft ones. (configurable) 
+    * ay oscilates 0 - 0.2 in very light movement - barely moving to 
+    * periodic re-calibration
 */
