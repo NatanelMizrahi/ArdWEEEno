@@ -1,3 +1,8 @@
+// 0.8,1.5,8,30,5000,5,1;
+// 0.6,2.8,2.3,50,5000,5,1;
+// 0.52,1.7,2.8,50,10000,5,1;
+// 0.55,0.5,2.8,0.12,50,10000,5,1;
+// 0.55,0.53,2.8,0.12,50,10000,5,1;
 #include <Wire.h>
 #include <SoftwareSerial.h>
 #include <DYPlayerArduino.h>
@@ -29,27 +34,37 @@ typedef struct {
 kalman_t;
 
 // Progress gain parameters
-float RESET_PROGRESS_DELAY_MS = 5000.0;
-float MIN_ANGLE_PROGRESS = 5.0;
-float ANGLE_PROGRESS_GAIN = 0.14;
-float PROGRESS_DECAY_RATE = 0.4;
-float PROGRESS_GAIN_FACTOR = 3.3;
+float RESET_PROGRESS_DELAY_MS = 10000.0;
+float MIN_ANGLE_PROGRESS = 7.0;
+float ANGLE_PROGRESS_GAIN = 0.55; 
+float PROGRESS_DECAY_RATE = 0.53;
+float PROGRESS_GAIN_FACTOR = 2.8;
+float PROGRESS_DECAY_LEVEL_EXP = 0.12;
+// 0.14, 3.3, 0.4, 0.04
 // 0.1,0.4,3.3
 // 0.44,1,3.3
 //0.55,1.2,4
+// 0.8,1.5,8,50
+// 0.55,0.53,2.8,0.12,50,10000,5,1;
 
 // audio constants 
 int AVAILABLE_VOICES_IN_DEVICE[3] = {0,0,0};
 const int MAX_VOLUME = 30;
+const int NUM_PLAYBACK_SPEEDS = 3;
 const int NUM_VOICES = 3;
-const int NUM_LEVELS = 7;
-const int PLAYBACKS_PER_LEVEL[NUM_VOICES][NUM_LEVELS] = {
-  {4,6,5,3,4,3,2}, // N
+const int MAX_LEVELS = 10;
+
+const int NUM_LEVELS_PER_VOICE[NUM_VOICES] = { 9, 0, 0 };
+const int PLAYBACKS_PER_LEVEL[NUM_VOICES][MAX_LEVELS] = {
+  // {7,8,9,8,7,7,6,3,3}, // N
+  {7,7,7,7,7,7,7,7,7}, // N
   {0,0,0,0,0,0,0}, // K
-  {0,0,0,0,0,0,0}, // A
+  {0,0,0,0,0,0,0} // A  
 };
 
-int selectedVoice;
+float VOLUME;
+int selectedVoice, numLevelsForVoice;
+float currentVolume;
 int level;
 bool playedMaxLevel;
 
@@ -62,12 +77,12 @@ float temperature;
 
 // UX configuration
 float availableVoicesVector;
-float shouldCheckIsPlaying = 1.0;
+float shouldPlayOnForwardOnly = 1.0;
 const bool SHOULD_INCREASE_ACCEL_FULL_RANGE = true;
 const bool SHOULD_INCREASE_GYRO_FULL_RANGE = false;
 const bool SERIAL_PLOTTER_ENABLED = true;
 const bool DEBUG_PRINTS_ENABLED = false;
-const int CALIBRATION_SAMPLE_SIZE = 200; //2000;
+const int CALIBRATION_SAMPLE_SIZE = 600; //2000;
 const int DISPLAY_INTERVAL_MS = 500;
 
 // IMU configuration registers and values
@@ -105,6 +120,7 @@ float dPitch, previousDPitch, previousPitch;
 
 bool playedInLevel;
 float resetTimeMs;
+long winTimeMs;
 
 enum direction_change_e {
   BACKWARDS = -1,
@@ -118,9 +134,11 @@ float* configurableParameters[] = {
   &ANGLE_PROGRESS_GAIN,
   &PROGRESS_DECAY_RATE,
   &PROGRESS_GAIN_FACTOR,
+  &PROGRESS_DECAY_LEVEL_EXP,
+  &VOLUME,
   &RESET_PROGRESS_DELAY_MS,
   &MIN_ANGLE_PROGRESS,
-  &shouldCheckIsPlaying
+  &shouldPlayOnForwardOnly
 };
 
 void updateSwingDirection() {
@@ -173,10 +191,12 @@ void configureSensitivity() {
   delay(20);
 }
 
-int selectRandomVoice() {
+void selectRandomVoice() {
   int numVoices = sizeof(AVAILABLE_VOICES_IN_DEVICE) / sizeof(AVAILABLE_VOICES_IN_DEVICE[0]);
   int randomIndex = random(0, numVoices);
   int randomVoice = AVAILABLE_VOICES_IN_DEVICE[randomIndex];
+  selectedVoice = randomVoice;
+  numLevelsForVoice = NUM_LEVELS_PER_VOICE[selectedVoice];
   return randomVoice;
 }
 
@@ -189,6 +209,25 @@ void displayMeasurements(state_t s) {
   // displayFloat("gZ", s.Gyro.Z);
   // displayFloat("aθ", angle.Acc.Y);
   Serial.println("");
+}
+
+
+void checkShouldRecalibrateIMU() {
+  // if barely moved for 30 seconds, recailbrate to remove angle drift errors
+  const int CALIBRATION_INTERVAL_MS = 30000;
+  const int CALIBRATION_MAX_ANGLE_DELTA = 1.5;
+  static float maxPitchInInterval, minPitchInInterval;
+  static long nextSampleTimeMs;
+
+  maxPitchInInterval = max(maxPitchInInterval, pitch);
+  minPitchInInterval = min(minPitchInInterval, pitch);
+
+  if (millis() >= nextSampleTimeMs) {
+    nextSampleTimeMs = millis() + CALIBRATION_INTERVAL_MS;
+    if ((maxPitchInInterval - minPitchInInterval) < CALIBRATION_MAX_ANGLE_DELTA) {
+      calibrateImu();
+    }
+  }
 }
 
 void calibrateImu() {
@@ -221,9 +260,17 @@ void calibrateImu() {
   }
 }
 
+void setVolume(float newVolume) {
+  if (newVolume != currentVolume) {
+    int normalizedVolume = floor(map((int)newVolume, 0, 100, 0, MAX_VOLUME));
+    player.setVolume(normalizedVolume);
+  }
+}
+
 void configurePlayer() {
   player.begin();
-  player.setVolume(MAX_VOLUME);
+  setVolume(100);
+  selectRandomVoice();
 }
 
 void configureIMU() {
@@ -333,9 +380,14 @@ void readParameters() {
     newValue = Serial.parseFloat();
     *configurableParameters[i] = newValue;
     delimiter = Serial.read();
-    if (delimiter == '.')
+    if (delimiter == ';')
       break;
-  }    
+  }
+
+  while(Serial.available() > 0)
+    Serial.read();
+
+  setVolume(VOLUME);
 }
 
 kalman_t kalmanFilter(
@@ -404,11 +456,27 @@ bool shouldUpdateProgress() {
   return true;
 }
 
+void runProgressBarErrorCorrection() {
+  // if stuck due to serial error, reset progress
+  if (progressBarValue == 100 && (millis() - winTimeMs) > 5000) {
+    progressBarValue = 0;
+  }
+}
+
 void updateProgressBar() {
   if (!shouldUpdateProgress())
     return;
-  float newValue = progressBarValue + pow(abs(pitch), ANGLE_PROGRESS_GAIN) / PROGRESS_GAIN_FACTOR - PROGRESS_DECAY_RATE;
-  progressBarValue = constrain(newValue, 0.0, 100.0);
+  float gain = pow(abs(pitch), ANGLE_PROGRESS_GAIN) / PROGRESS_GAIN_FACTOR;
+  float decay =  PROGRESS_DECAY_RATE + pow(1 + progressBarValue, PROGRESS_DECAY_LEVEL_EXP);
+  float newValue = progressBarValue + gain - decay;
+  newValue = constrain(newValue, 0.0, 100.0);
+  
+  if (progressBarValue < 100 && newValue == 100) {
+    winTimeMs = millis();
+  }
+
+  progressBarValue = newValue;
+  runProgressBarErrorCorrection();
 }
 
 void checkAndProcessReset() {
@@ -425,9 +493,9 @@ bool shouldPlaySound() {
     return false;
   if ((level == 0) && (abs(pitch) < MIN_ANGLE_PROGRESS))
     return false;
-  if (swingDirectionChange == NO_DIRECTION_CHANGE)
+  if (!(swingDirectionChange == FORWARD || !shouldPlayOnForwardOnly && swingDirectionChange == BACKWARDS))
     return false;
-  if (shouldCheckIsPlaying && player.checkPlayState() == DY::PlayState::Playing)
+  if (player.checkPlayState() == DY::PlayState::Playing)
     return false;
   return true;
 }
@@ -463,20 +531,22 @@ int getLevelRandomPermutationIndex(int level) {
   return permutation[currentIndex];
 }
 
-void play(int voice, int level, int index) {
+void play(int voice, int level, int index, int speed) {
   static char path[30];
-  sprintf(path, "/%d/%d/%d.mp3", voice, level, index);
+  sprintf(path, "/%d/%d/%d/%d.wav", voice, level, index, speed);
   player.playSpecifiedDevicePath(DY::Device::Sd, path);
 }
 
 void playSound() {
-  level = floor(map(progressBarValue, 0, 100, 0, NUM_LEVELS - 1));
+
+  level = floor(map(progressBarValue, 0, 100, 0, numLevelsForVoice - 1));
   if (!shouldPlaySound())
     return;
 
   int randomPlaybackIndex = getLevelRandomPermutationIndex(level);
-  play(selectedVoice, level, randomPlaybackIndex);
-  playedMaxLevel = (level == (NUM_LEVELS - 1));
+  int randomSpeed = random(0, NUM_PLAYBACK_SPEEDS);
+  play(selectedVoice, level, randomPlaybackIndex, randomSpeed);
+  playedMaxLevel = (level == (numLevelsForVoice - 1));
 }
 
 void loop() {
@@ -489,7 +559,7 @@ void loop() {
   checkAndProcessReset();
 }
 
-// TODO: ignore very small changes
+// TODO: ignore very small changes in dPitch
 // gY oscilattes. very light is around +-15 - should be the threshold for soft ones. (configurable) 
 // ay oscilates 0 - 0.2 in very light movement - barely moving to 
 // periodic re-calibration
