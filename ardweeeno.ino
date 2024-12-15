@@ -36,7 +36,7 @@ float PROGRESS_DECAY_RATE = 0.53;
 float PROGRESS_GAIN_FACTOR = 2.8;
 float PROGRESS_DECAY_LEVEL_EXP = 0.12;
 float VOLUME;
-float RESET_PROGRESS_DELAY_MS = 4000.0;
+float RESET_PROGRESS_DELAY_MS = 20000.0;
 float MIN_ANGLE_PROGRESS = 7.0;
 float shouldPlayOnForwardOnly = 1.0;
 float D_PITCH_UPDATE_NOISE_THRESHOLD = 0.015;
@@ -46,18 +46,18 @@ float IS_IDLE_CHECK_INTERVAL_MS = 30000;
 // ******************************
 
 // audio constants 
-int AVAILABLE_VOICES_IN_DEVICE[3] = {0,0,0};
+int AVAILABLE_VOICES_IN_DEVICE[2] = {1,2};
 const int MAX_VOLUME = 30;
 const int NUM_PLAYBACK_SPEEDS = 3;
-const int NUM_VOICES = 3;
+const int NUM_VOICES = 4;
 const int MAX_LEVELS = 10;
 
-const int NUM_LEVELS_PER_VOICE[NUM_VOICES] = { 9, 0, 0 };
+const int NUM_LEVELS_PER_VOICE[NUM_VOICES] = { 9, 9, 10, 0 };
 const int PLAYBACKS_PER_LEVEL[NUM_VOICES][MAX_LEVELS] = {
-  // {7,8,9,8,7,7,6,3,3}, // N
-  {7,7,7,7,7,7,7,7,7}, // N
-  {0,0,0,0,0,0,0}, // K
-  {0,0,0,0,0,0,0} // A  
+  {5,5,5,5,5,5,5,5,5},    // Test
+  {7,8,9,8,7,7,6,3,3},    // N
+  {8,8,7,4,6,8,8,8,10,2}, // A
+  {0,0,0,0,0,0,0}         // M  
 };
 
 int selectedVoice, numLevelsForVoice;
@@ -89,6 +89,7 @@ const int ACCEL_CONFIG_REGISTER = 0x1C;
 const int ACCEL_CONFIG_FULL_RANGE_4G = 0x08; // +/- 4g full scale range (default +/- 2g)
 const int GYRO_CONFIG_REGISTER = 0x1B;
 const int GYRO_CONFIG_FULL_RANGE_VAL = 0x10; // 1000deg/s full scale (default +/- 250deg/s)
+
 
 // pitch/roll angle kalman filter constants
 const int ACCELEROMETER_UNCERTAINTY_STD_DEV_DEGREES = 3;
@@ -139,6 +140,7 @@ float* configurableParameters[] = {
   &shouldPlayOnForwardOnly,
   &D_PITCH_UPDATE_NOISE_THRESHOLD,
   &IS_IDLE_CHECK_INTERVAL_MS
+  // ,&selectedVoice
 };
 
 void updateSwingDirection() {
@@ -555,7 +557,7 @@ void playSound() {
 
 void loop() {
   readParameters();
-  measureAngles();
+  measureAngles(); 
   updateSwingDirection();
   updateProgressBar();
   playSound();
