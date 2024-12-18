@@ -1,3 +1,13 @@
+/*
+A swing motion tracker that keeps a score and plays sounds interactively.
+
+NOTES:
+* used this video/repo as a reference https://youtu.be/7VW_XVbtu9k 
+* using Kalman filter to improve angle calculation accuracy due to gyro drift
+* periodically re-calibrates on idle state
+
+*/
+
 #include <Wire.h>
 #include <SoftwareSerial.h>
 #include <DYPlayerArduino.h>
@@ -39,25 +49,24 @@ float VOLUME;
 float RESET_PROGRESS_DELAY_MS = 20000.0;
 float MIN_ANGLE_PROGRESS = 7.0;
 float shouldPlayOnForwardOnly = 1.0;
-float D_PITCH_UPDATE_NOISE_THRESHOLD = 0.015;
 float IS_IDLE_CHECK_INTERVAL_MS = 30000;
 
 // 0.55,0.53,2.8,0.12,4000.0,7.0,1.0,0.015,10000
 // ******************************
 
 // audio constants 
-int AVAILABLE_VOICES_IN_DEVICE[2] = {1,2};
+int AVAILABLE_VOICES_IN_DEVICE[2] = {3,3};
 const int MAX_VOLUME = 30;
 const int NUM_PLAYBACK_SPEEDS = 3;
 const int NUM_VOICES = 4;
 const int MAX_LEVELS = 10;
 
-const int NUM_LEVELS_PER_VOICE[NUM_VOICES] = { 9, 9, 10, 0 };
+const int NUM_LEVELS_PER_VOICE[NUM_VOICES] = {9, 9, 10, 10};
 const int PLAYBACKS_PER_LEVEL[NUM_VOICES][MAX_LEVELS] = {
   {5,5,5,5,5,5,5,5,5},    // Test
   {7,8,9,8,7,7,6,3,3},    // N
   {8,8,7,4,6,8,8,8,10,2}, // A
-  {0,0,0,0,0,0,0}         // M  
+  {8,7,9,9,8,10,9,9,5,3}  // M  
 };
 
 int selectedVoice, numLevelsForVoice;
@@ -86,7 +95,7 @@ const int MPU = 0x68; // MPU6050 I2C address
 const float ACCEL_DIVISION_FACTOR = SHOULD_INCREASE_ACCEL_FULL_RANGE ? 8192.0 : 16384.0; // For a range of +-2g, we need to divide the raw values by 16384, according to the datasheet
 const float GYRO_DIVISION_FACTOR = 131.0; // For a 250deg/s range we have to divide first the raw value by 131.0, according to the datasheet
 const int ACCEL_CONFIG_REGISTER = 0x1C;
-const int ACCEL_CONFIG_FULL_RANGE_4G = 0x08; // +/- 4g full scale range (default +/- 2g)
+const int ACCEL_CONFIG_FULL_RANGE_4G = 0x08; 
 const int GYRO_CONFIG_REGISTER = 0x1B;
 const int GYRO_CONFIG_FULL_RANGE_VAL = 0x10; // 1000deg/s full scale (default +/- 250deg/s)
 
@@ -96,7 +105,7 @@ const int ACCELEROMETER_UNCERTAINTY_STD_DEV_DEGREES = 3;
 const int GYRO_ERROR_STD_DEV_DEG_PER_SEC = 4;
 const int ANGLE_UNCERTAINTY_STD_DEV_DEGREES = 2;
 const float KALMAN_INITIAL_ANGLE_STATE = 0; // swing starts in a mostly leveled surface
-const float KALMAN_INITIAL_ANGLE_UNCERTAINTY = ANGLE_UNCERTAINTY_STD_DEV_DEGREES * ANGLE_UNCERTAINTY_STD_DEV_DEGREES; // but allowing for some error
+const float KALMAN_INITIAL_ANGLE_UNCERTAINTY = ANGLE_UNCERTAINTY_STD_DEV_DEGREES * ANGLE_UNCERTAINTY_STD_DEV_DEGREES; // 
 
 kalman_t kalmanRoll = {
   KALMAN_INITIAL_ANGLE_STATE,
@@ -296,24 +305,24 @@ void configureIMU() {
   calibrateImu();
 }
 
-void displayFloat(char * label, float value, bool last) {
+void displayFloat(char * label, float value, bool isLast) {
   static char floatBuffer[12];
   if (SERIAL_PLOTTER_ENABLED) {
     Serial.print(label);
-
     Serial.print(":");
     Serial.print(value);
-    if (last)
+    if (isLast)
       Serial.println();
     else
       Serial.print(",");
-  } else if (DEBUG_PRINTS_ENABLED) {
+  } 
+  else if (DEBUG_PRINTS_ENABLED) {
     dtostrf(value, 6, 2, floatBuffer);
     Serial.print(" | ");
     Serial.print(label);
     Serial.print(": ");
     Serial.print(floatBuffer);
-    if (last)
+    if (isLast)
       Serial.println();
   }
 }
@@ -327,7 +336,6 @@ void displayState() {
     displayFloat("L", level * 10);
     displayFloat("💲", progressBarValue);
     displayFloat("🔁", ((int)swingDirectionChange) * 30);
-    displayFloat("dθ", dPitch * 100);
     displayMeasurements(state);
   }
 }
@@ -565,12 +573,3 @@ void loop() {
   checkAndProcessReset();
   checkShouldRecalibrateIMU();
 }
-
-/*
-    NOTES:
-    * used this video/repo as a reference https://youtu.be/7VW_XVbtu9k 
-    * using Kalman filter to improve angle calculation accuracy due to gyro drift
-    * gY oscilattes. very light is around +-15 - should be the threshold for soft ones. (configurable) 
-    * ay oscilates 0 - 0.2 in very light movement - barely moving to 
-    * periodic re-calibration
-*/
