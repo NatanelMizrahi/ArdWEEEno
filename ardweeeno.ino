@@ -1,72 +1,85 @@
 /*
-A swing motion tracker that keeps a score and plays sounds interactively.
+    A swing motion tracker that keeps a score and plays sounds interactively.
 
-NOTES:
-* used this video/repo as a reference https://youtu.be/7VW_XVbtu9k 
-* using Kalman filter to improve angle calculation accuracy due to gyro drift
-* periodically re-calibrates on idle state
-
+    NOTES:
+    * used this video/repo as a reference https://youtu.be/7VW_XVbtu9k 
+    * using Kalman filter to improve angle calculation accuracy due to gyro drift 
+    * periodically re-calibrates on idle state
 */
 
 #include <Wire.h>
 #include <SoftwareSerial.h>
 #include <DYPlayerArduino.h>
 
-void displayFloat(char * label, float value, bool last = false);
+void displayFloat(char* label, float value, bool last = false);
+void shuffle(int arr[], int length);
 
 const int AUDIO_RX_PIN = 2;
 const int AUDIO_TX_PIN = 3;
 
 SoftwareSerial AudioSerial(AUDIO_RX_PIN, AUDIO_TX_PIN);
-DY::Player player( & AudioSerial);
+DY::Player player(&AudioSerial);
 
 typedef struct {
   float X, Y, Z;
-}
-coords_t;
+} coords_t;
 
 typedef struct {
   coords_t Acc;
   coords_t Gyro;
   float speed;
-}
-state_t;
+} state_t;
 
 typedef struct {
   float State;
   float Uncertainty;
-}
-kalman_t;
+} kalman_t;
 
+// *****************************
 // ** CONFIGURABLE PARAMETERS **
+// *****************************
 
 // Progress gain parameters
-float ANGLE_PROGRESS_GAIN = 0.55; 
+float ANGLE_PROGRESS_GAIN = 0.55;
 float PROGRESS_DECAY_RATE = 0.53;
 float PROGRESS_GAIN_FACTOR = 2.8;
 float PROGRESS_DECAY_LEVEL_EXP = 0.12;
+float D_PITCH_UPDATE_NOISE_THRESHOLD = 0.015;
 float VOLUME;
-float RESET_PROGRESS_DELAY_MS = 20000.0;
+float IDLE_PROGRESS_DELAY_MS = 5000.0;
+float RESET_PROGRESS_DELAY_MS = 11000.0;
 float MIN_ANGLE_PROGRESS = 7.0;
 float shouldPlayOnForwardOnly = 1.0;
 float IS_IDLE_CHECK_INTERVAL_MS = 30000;
 
-// 0.55,0.53,2.8,0.12,4000.0,7.0,1.0,0.015,10000
-// ******************************
+// int AVAILABLE_VOICES_IN_DEVICE[5] = { 0, 1, 2, 3, 4 }; // Swing 1 params 
+// int AVAILABLE_VOICES_IN_DEVICE[5] = { 5, 6, 7, 8, 9 }; // Swing 2 params 
+int AVAILABLE_VOICES_IN_DEVICE[1] = { 10 }; // Test params
 
-// audio constants 
-int AVAILABLE_VOICES_IN_DEVICE[2] = {3,3};
+// Full configuration via Serial monitor: 
+// 0.55,0.53,2.8,0.12,4000.0,7.0,1.0,0.015,10000
+
+// *****************************
+
+// audio constants
 const int MAX_VOLUME = 30;
 const int NUM_PLAYBACK_SPEEDS = 3;
-const int NUM_VOICES = 4;
-const int MAX_LEVELS = 10;
+const int NUM_VOICES = 11;
+const int MAX_LEVELS = 11;
 
-const int NUM_LEVELS_PER_VOICE[NUM_VOICES] = {9, 9, 10, 10};
+const int NUM_LEVELS_PER_VOICE[NUM_VOICES] = { 10, 11, 10, 9, 11, 9, 9, 8, 9, 9, 9 };
 const int PLAYBACKS_PER_LEVEL[NUM_VOICES][MAX_LEVELS] = {
-  {5,5,5,5,5,5,5,5,5},    // Test
-  {7,8,9,8,7,7,6,3,3},    // N
-  {8,8,7,4,6,8,8,8,10,2}, // A
-  {8,7,9,9,8,10,9,9,5,3}  // M  
+  { 8,  9,  6,  4,  6,  8,  8,  8, 10,  2},      // [0] AP (10)
+  {11, 15, 14, 11,  7,  8, 11,  5, 10,  4,  1},  // [1] BA (11)
+  { 8,  7,  9,  9,  8, 10,  9,  9,  5,  3},      // [2] MM (10)
+  {13, 14, 11,  8, 10,  9,  6,  4,  1},          // [3] MT (9)
+  {12, 11, 13, 18, 17, 14, 12, 10,  8, 12,  5},  // [4] AN (11)
+  {13, 12,  9,  7,  7,  7,  6,  7,  5},          // [5] NO (9)
+  {16, 13, 14, 13, 14, 19, 13, 21,  5},          // [6] YB (9)
+  {11, 15, 14, 14, 12, 11,  8,  4},              // [7] EH (8)
+  { 7,  8,  9,  8,  7,  7,  6,  3,  3},          // [8] NA (9)
+  {20, 15, 16, 15, 12,  7,  3,  4,  1},          // [9] JH (9)
+  { 5,  5,  5,  5,  5,  5,  5,  5,  5 }          // [10] Test (9)
 };
 
 int selectedVoice, numLevelsForVoice;
@@ -91,21 +104,21 @@ const int CALIBRATION_SAMPLE_SIZE = 600; //2000;
 const int DISPLAY_INTERVAL_MS = 500;
 
 // IMU configuration registers and values
-const int MPU = 0x68; // MPU6050 I2C address
-const float ACCEL_DIVISION_FACTOR = SHOULD_INCREASE_ACCEL_FULL_RANGE ? 8192.0 : 16384.0; // For a range of +-2g, we need to divide the raw values by 16384, according to the datasheet
-const float GYRO_DIVISION_FACTOR = 131.0; // For a 250deg/s range we have to divide first the raw value by 131.0, according to the datasheet
+const int MPU = 0x68;                                                                     // MPU6050 I2C address
+const float ACCEL_DIVISION_FACTOR = SHOULD_INCREASE_ACCEL_FULL_RANGE ? 8192.0 : 16384.0;  // For a range of +-2g, we need to divide the raw values by 16384, according to the datasheet
+const float GYRO_DIVISION_FACTOR = 131.0;                                                 // For a 250deg/s range we have to divide first the raw value by 131.0, according to the datasheet
 const int ACCEL_CONFIG_REGISTER = 0x1C;
-const int ACCEL_CONFIG_FULL_RANGE_4G = 0x08; 
+const int ACCEL_CONFIG_FULL_RANGE_4G = 0x08;
 const int GYRO_CONFIG_REGISTER = 0x1B;
-const int GYRO_CONFIG_FULL_RANGE_VAL = 0x10; // 1000deg/s full scale (default +/- 250deg/s)
+const int GYRO_CONFIG_FULL_RANGE_VAL = 0x10;  // 1000deg/s full scale (default +/- 250deg/s)
 
 
 // pitch/roll angle kalman filter constants
 const int ACCELEROMETER_UNCERTAINTY_STD_DEV_DEGREES = 3;
 const int GYRO_ERROR_STD_DEV_DEG_PER_SEC = 4;
 const int ANGLE_UNCERTAINTY_STD_DEV_DEGREES = 2;
-const float KALMAN_INITIAL_ANGLE_STATE = 0; // swing starts in a mostly leveled surface
-const float KALMAN_INITIAL_ANGLE_UNCERTAINTY = ANGLE_UNCERTAINTY_STD_DEV_DEGREES * ANGLE_UNCERTAINTY_STD_DEV_DEGREES; // 
+const float KALMAN_INITIAL_ANGLE_STATE = 0;                                                                            // swing starts in a mostly leveled surface
+const float KALMAN_INITIAL_ANGLE_UNCERTAINTY = ANGLE_UNCERTAINTY_STD_DEV_DEGREES * ANGLE_UNCERTAINTY_STD_DEV_DEGREES;  //
 
 kalman_t kalmanRoll = {
   KALMAN_INITIAL_ANGLE_STATE,
@@ -133,8 +146,8 @@ enum direction_change_e {
   BACKWARDS = -1,
   NO_DIRECTION_CHANGE = 0,
   FORWARD = 1
-}
-swingDirectionChange = NO_DIRECTION_CHANGE;
+} swingDirectionChange = NO_DIRECTION_CHANGE;
+
 bool passedMinPoint;
 bool isSwinging;
 
@@ -149,7 +162,6 @@ float* configurableParameters[] = {
   &shouldPlayOnForwardOnly,
   &D_PITCH_UPDATE_NOISE_THRESHOLD,
   &IS_IDLE_CHECK_INTERVAL_MS
-  // ,&selectedVoice
 };
 
 void updateSwingDirection() {
@@ -170,7 +182,7 @@ void updateSwingDirection() {
     if (shouldUpdateDPitch) {
       dPitch = newDPitch;
     }
-    previousWindowPitchAvg = currentWindowPitchAvg;  
+    previousWindowPitchAvg = currentWindowPitchAvg;
     if (previousDPitch < 0 && dPitch >= 0) {
       swingDirectionChange = FORWARD;
     }
@@ -182,7 +194,7 @@ void updateSwingDirection() {
     previousPitch = pitch;
     pitchSampleSum = 0;
     pitchSampleCount = 0;
-    
+
     if (shouldUpdateDPitch) {
       previousDPitch = dPitch;
     }
@@ -209,9 +221,27 @@ void configureSensitivity() {
   delay(20);
 }
 
+// this function ensures all voices on the device are sampled before repeating for maximal variability
+int getRandomVoiceIndex() {
+  static int numVoices = sizeof(AVAILABLE_VOICES_IN_DEVICE) / sizeof(AVAILABLE_VOICES_IN_DEVICE[0]);
+  static int permutation[NUM_VOICES];
+  static int currentIndex = -1;
+  
+  currentIndex++;
+  if (currentIndex == numVoices) {
+    for (int i = 0; i < numVoices; i++) {
+      permutation[i] = i;
+    }
+    shuffle(permutation, numVoices);
+    currentIndex = 0;
+  }
+  return permutation[currentIndex];
+
+// return random(0, numVoices); // simpler implementation
+}
+
 void selectRandomVoice() {
-  int numVoices = sizeof(AVAILABLE_VOICES_IN_DEVICE) / sizeof(AVAILABLE_VOICES_IN_DEVICE[0]);
-  int randomIndex = random(0, numVoices);
+  int randomIndex = getRandomVoiceIndex();
   int randomVoice = AVAILABLE_VOICES_IN_DEVICE[randomIndex];
   selectedVoice = randomVoice;
   numLevelsForVoice = NUM_LEVELS_PER_VOICE[selectedVoice];
@@ -251,7 +281,7 @@ void checkShouldRecalibrateIMU() {
 }
 
 void calibrateImu() {
-  // Note that we should place the IMU flat in order to get the correct values.   
+  // Note that we should place the IMU flat in order to get the correct values.
 
   for (int i = 0; i < CALIBRATION_SAMPLE_SIZE; i++) {
     readImuData();
@@ -295,17 +325,17 @@ void configurePlayer() {
 
 void configureIMU() {
   Wire.setClock(400000);
-  Wire.begin(); // Initialize comunication
-  Wire.beginTransmission(MPU); // Start communication with MPU6050 // MPU=0x68
-  Wire.write(0x6B); // Talk to the register 6B
-  Wire.write(0x00); // Make reset - place a 0 into the 6B register
-  Wire.endTransmission(true); //end the transmission
+  Wire.begin();                 // Initialize comunication
+  Wire.beginTransmission(MPU);  // Start communication with MPU6050 // MPU=0x68
+  Wire.write(0x6B);             // Talk to the register 6B
+  Wire.write(0x00);             // Make reset - place a 0 into the 6B register
+  Wire.endTransmission(true);   //end the transmission
 
   configureSensitivity();
   calibrateImu();
 }
 
-void displayFloat(char * label, float value, bool isLast) {
+void displayFloat(char* label, float value, bool isLast) {
   static char floatBuffer[12];
   if (SERIAL_PLOTTER_ENABLED) {
     Serial.print(label);
@@ -315,8 +345,7 @@ void displayFloat(char * label, float value, bool isLast) {
       Serial.println();
     else
       Serial.print(",");
-  } 
-  else if (DEBUG_PRINTS_ENABLED) {
+  } else if (DEBUG_PRINTS_ENABLED) {
     dtostrf(value, 6, 2, floatBuffer);
     Serial.print(" | ");
     Serial.print(label);
@@ -353,9 +382,9 @@ float readFloat() {
 
 void readImuData() {
   Wire.beginTransmission(MPU);
-  Wire.write(0x3B); // Start with register 0x3B (ACCEL_XOUT_H)
+  Wire.write(0x3B);  // Start with register 0x3B (ACCEL_XOUT_H)
   Wire.endTransmission(false);
-  Wire.requestFrom(MPU, 7 * 2, true); // Read 14 registers total, each value is stored in 2 registers
+  Wire.requestFrom(MPU, 7 * 2, true);  // Read 14 registers total, each value is stored in 2 registers
 
   // For a range of +-2g, we need to divide the raw values by 16384, according to the datasheet
   state.Acc.X = readFloat() / ACCEL_DIVISION_FACTOR;
@@ -371,10 +400,10 @@ void readImuData() {
 }
 
 void readParameters() {
-  if (Serial.available() == 0) 
+  if (Serial.available() == 0)
     return;
-  
-  int numParams = sizeof(configurableParameters)/sizeof(configurableParameters[0]);
+
+  int numParams = sizeof(configurableParameters) / sizeof(configurableParameters[0]);
   float newValue;
   char delimiter;
 
@@ -386,7 +415,7 @@ void readParameters() {
       break;
   }
 
-  while(Serial.available() > 0)
+  while (Serial.available() > 0)
     Serial.read();
 
   setVolume(VOLUME);
@@ -397,7 +426,7 @@ kalman_t kalmanFilter(
   float kalmanInputGyroRate,
   float kalmanMeasurementAccelAngle,
   float elapsedTimeSeconds) {
-  
+
   float dt = elapsedTimeSeconds;
   kalman.State = kalman.State + dt * kalmanInputGyroRate;
   kalman.Uncertainty = kalman.Uncertainty + pow(dt, 2) * pow(GYRO_ERROR_STD_DEV_DEG_PER_SEC, 2);
@@ -437,7 +466,7 @@ void measureAngles() {
   angle.Gyro.Y = angle.Gyro.Y + state.Gyro.Y * elapsedTimeSeconds;
 
   // Complementary filter - combine acceleromter and gyro angle values
-  // yaw = yaw + state.Gyro.Z * elapsedTimeSeconds; 
+  // yaw = yaw + state.Gyro.Z * elapsedTimeSeconds;
   // roll = 0.96 * angle.Gyro.X + 0.04 * angle.Acc.X;
   // pitch = 0.96 * angle.Gyro.Y + 0.04 * angle.Acc.Y;
 
@@ -447,7 +476,7 @@ void measureAngles() {
 
   roll = kalmanRoll.State;
   pitch = kalmanPitch.State;
-  yaw = yaw + state.Gyro.Z * elapsedTimeSeconds; // can't use kalman filter for yaw
+  yaw = yaw + state.Gyro.Z * elapsedTimeSeconds;  // can't use kalman filter for yaw
 
   maxPitchAngle = max(maxPitchAngle, abs(pitch));
 }
@@ -471,10 +500,10 @@ void updateProgressBar() {
   if (!shouldUpdateProgress())
     return;
   float gain = pow(abs(pitch), ANGLE_PROGRESS_GAIN) / PROGRESS_GAIN_FACTOR;
-  float decay =  PROGRESS_DECAY_RATE + pow(1 + progressBarValue, PROGRESS_DECAY_LEVEL_EXP);
+  float decay = PROGRESS_DECAY_RATE + pow(1 + progressBarValue, PROGRESS_DECAY_LEVEL_EXP);
   float newValue = progressBarValue + gain - decay;
   newValue = constrain(newValue, 0.0, 100.0);
-  
+
   if (progressBarValue < 100 && newValue == 100) {
     winTimeMs = millis();
   }
@@ -496,9 +525,9 @@ void checkAndProcessReset() {
   if (playedMaxLevel) {
     doReset();
   }
-  
+
   if (!isSwinging) {
-    resetTimeMs = millis() + RESET_PROGRESS_DELAY_MS;
+    resetTimeMs = millis() + IDLE_PROGRESS_DELAY_MS;
   }
 }
 
@@ -509,6 +538,8 @@ bool shouldPlaySound() {
     return false;
   if (!(swingDirectionChange == FORWARD || !shouldPlayOnForwardOnly && swingDirectionChange == BACKWARDS))
     return false;
+
+  // displayFloat("p", (float)(player.checkPlayState() == DY::PlayState::Playing) * 50);
   if (player.checkPlayState() == DY::PlayState::Playing)
     return false;
   return true;
@@ -526,11 +557,11 @@ void shuffle(int arr[], int length) {
 
 // this function ensures all voices in each level are sampled before repeating for maximal variability
 int getLevelRandomPermutationIndex(int level) {
-  static int permutation[20];
+  static int permutation[25];
   static int numLevelOptions;
   static int currentIndex;
   static int currentLevel = -1;
-  
+
   currentIndex++;
   if (level != currentLevel || currentIndex == numLevelOptions) {
     numLevelOptions = PLAYBACKS_PER_LEVEL[selectedVoice][level];
@@ -565,11 +596,11 @@ void playSound() {
 
 void loop() {
   readParameters();
-  measureAngles(); 
+  measureAngles();
   updateSwingDirection();
   updateProgressBar();
-  playSound();
   displayState();
+  playSound();
   checkAndProcessReset();
   checkShouldRecalibrateIMU();
 }
