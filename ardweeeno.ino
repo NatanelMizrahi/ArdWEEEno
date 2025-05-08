@@ -52,9 +52,9 @@ float MIN_ANGLE_PROGRESS = 7.0;
 float shouldPlayOnForwardOnly = 1.0;
 float IS_IDLE_CHECK_INTERVAL_MS = 30000;
 
-// int AVAILABLE_VOICES_IN_DEVICE[1] = { 10 }; // Test params
-// int AVAILABLE_VOICES_IN_DEVICE[5] = { 0, 1, 2, 3, 4 }; // Swing 1 params 
-int AVAILABLE_VOICES_IN_DEVICE[5] = { 5, 6, 7, 8, 9 }; // Swing 2 params 
+// int AVAILABLE_VOICES_IN_DEVICE[1] = { 0 }; // Test params
+// int AVAILABLE_VOICES_IN_DEVICE[5] = { 1, 2, 3, 4, 5 }; // Swing 1 params 
+int AVAILABLE_VOICES_IN_DEVICE[5] = { 6, 7, 8, 9, 10 }; // Swing 2 params 
 
 // Full configuration via Serial monitor: 
 // 0.55,0.53,2.8,0.12,4000.0,7.0,1.0,0.015,10000
