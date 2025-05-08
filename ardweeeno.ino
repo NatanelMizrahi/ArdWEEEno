@@ -47,17 +47,18 @@ float PROGRESS_DECAY_LEVEL_EXP = 0.12;
 float D_PITCH_UPDATE_NOISE_THRESHOLD = 0.015;
 float VOLUME;
 float IDLE_PROGRESS_DELAY_MS = 5000.0;
-float RESET_PROGRESS_DELAY_MS = 11000.0;
+float RESET_PROGRESS_DELAY_MS = 12000.0;
 float MIN_ANGLE_PROGRESS = 7.0;
 float shouldPlayOnForwardOnly = 1.0;
 float IS_IDLE_CHECK_INTERVAL_MS = 30000;
 
+// int AVAILABLE_VOICES_IN_DEVICE[1] = { 10 }; // Test params
 // int AVAILABLE_VOICES_IN_DEVICE[5] = { 0, 1, 2, 3, 4 }; // Swing 1 params 
-// int AVAILABLE_VOICES_IN_DEVICE[5] = { 5, 6, 7, 8, 9 }; // Swing 2 params 
-int AVAILABLE_VOICES_IN_DEVICE[1] = { 10 }; // Test params
+int AVAILABLE_VOICES_IN_DEVICE[5] = { 5, 6, 7, 8, 9 }; // Swing 2 params 
 
 // Full configuration via Serial monitor: 
 // 0.55,0.53,2.8,0.12,4000.0,7.0,1.0,0.015,10000
+// 0.58,0.53,2.8,0.12,4000.0,7.0,1.0,0.015,10000
 
 // *****************************
 
@@ -67,19 +68,19 @@ const int NUM_PLAYBACK_SPEEDS = 3;
 const int NUM_VOICES = 11;
 const int MAX_LEVELS = 11;
 
-const int NUM_LEVELS_PER_VOICE[NUM_VOICES] = { 10, 11, 10, 9, 11, 9, 9, 8, 9, 9, 9 };
+const int NUM_LEVELS_PER_VOICE[NUM_VOICES] = { 9, 11, 10, 10, 9, 11, 9, 9, 8, 9, 9 };
 const int PLAYBACKS_PER_LEVEL[NUM_VOICES][MAX_LEVELS] = {
-  { 8,  9,  6,  4,  6,  8,  8,  8, 10,  2},      // [0] AP (10)
-  {11, 15, 14, 11,  7,  8, 11,  5, 10,  4,  1},  // [1] BA (11)
-  { 8,  7,  9,  9,  8, 10,  9,  9,  5,  3},      // [2] MM (10)
-  {13, 14, 11,  8, 10,  9,  6,  4,  1},          // [3] MT (9)
-  {12, 11, 13, 18, 17, 14, 12, 10,  8, 12,  5},  // [4] AN (11)
-  {13, 12,  9,  7,  7,  7,  6,  7,  5},          // [5] NO (9)
-  {16, 13, 14, 13, 14, 19, 13, 21,  5},          // [6] YB (9)
-  {11, 15, 14, 14, 12, 11,  8,  4},              // [7] EH (8)
-  { 7,  8,  9,  8,  7,  7,  6,  3,  3},          // [8] NA (9)
-  {20, 15, 16, 15, 12,  7,  3,  4,  1},          // [9] JH (9)
-  { 5,  5,  5,  5,  5,  5,  5,  5,  5 }          // [10] Test (9)
+  { 5,  5,  5,  5,  5,  5,  5,  5,  5},         // [0] Tst (9)
+  {11, 15, 14, 11,  7,  8, 11,  5, 10,  4,  1}, // [1] BA (11)
+  { 8,  9,  6,  4,  6,  8,  8,  8, 10,  2},     // [2] AP (10)
+  { 8,  7,  9,  9,  8, 10,  9,  9,  5,  3},     // [3] MM (10)
+  {13, 14, 11,  8, 10,  9,  6,  4,  1},         // [4] MT (9)
+  {12, 11, 13, 18, 17, 14, 12, 10,  8, 12,  5}, // [5] AN (11)
+  {13, 12,  9,  7,  7,  7,  6,  7,  5},         // [6] NO (9)
+  {16, 13, 14, 13, 14, 19, 13, 21,  5},         // [7] YB (9)
+  {11, 15, 14, 14, 12, 11,  8,  4},             // [8] EH (8)
+  { 7,  8,  9,  8,  7,  7,  6,  3,  3},         // [9] NA (9)
+  {20, 15, 16, 15, 12,  7,  3,  4,  1}          // [10] JH (9)
 };
 
 int selectedVoice, numLevelsForVoice;
@@ -99,8 +100,9 @@ float availableVoicesVector;
 const bool SHOULD_INCREASE_ACCEL_FULL_RANGE = true;
 const bool SHOULD_INCREASE_GYRO_FULL_RANGE = false;
 const bool SERIAL_PLOTTER_ENABLED = true;
-const bool DEBUG_PRINTS_ENABLED = false;
-const int CALIBRATION_SAMPLE_SIZE = 600; //2000;
+const bool VERBOSE = false;
+const bool SPEED_VARIATIONS_ENABLED = false;
+const int CALIBRATION_SAMPLE_SIZE = 600;
 const int DISPLAY_INTERVAL_MS = 500;
 
 // IMU configuration registers and values
@@ -117,8 +119,8 @@ const int GYRO_CONFIG_FULL_RANGE_VAL = 0x10;  // 1000deg/s full scale (default +
 const int ACCELEROMETER_UNCERTAINTY_STD_DEV_DEGREES = 3;
 const int GYRO_ERROR_STD_DEV_DEG_PER_SEC = 4;
 const int ANGLE_UNCERTAINTY_STD_DEV_DEGREES = 2;
-const float KALMAN_INITIAL_ANGLE_STATE = 0;                                                                            // swing starts in a mostly leveled surface
-const float KALMAN_INITIAL_ANGLE_UNCERTAINTY = ANGLE_UNCERTAINTY_STD_DEV_DEGREES * ANGLE_UNCERTAINTY_STD_DEV_DEGREES;  //
+const float KALMAN_INITIAL_ANGLE_STATE = 0; // swing starts in a mostly leveled surface
+const float KALMAN_INITIAL_ANGLE_UNCERTAINTY = ANGLE_UNCERTAINTY_STD_DEV_DEGREES * ANGLE_UNCERTAINTY_STD_DEV_DEGREES;
 
 kalman_t kalmanRoll = {
   KALMAN_INITIAL_ANGLE_STATE,
@@ -221,14 +223,15 @@ void configureSensitivity() {
   delay(20);
 }
 
-// this function ensures all voices on the device are sampled before repeating for maximal variability
+// This function ensures all available voices on the device are sampled before repeating for maximal variability
+// Alternative simpler implementation: return random(0, numVoices);
 int getRandomVoiceIndex() {
   static int numVoices = sizeof(AVAILABLE_VOICES_IN_DEVICE) / sizeof(AVAILABLE_VOICES_IN_DEVICE[0]);
   static int permutation[NUM_VOICES];
-  static int currentIndex = -1;
+  static int currentIndex = numVoices;
   
   currentIndex++;
-  if (currentIndex == numVoices) {
+  if (currentIndex >= numVoices) {
     for (int i = 0; i < numVoices; i++) {
       permutation[i] = i;
     }
@@ -236,11 +239,9 @@ int getRandomVoiceIndex() {
     currentIndex = 0;
   }
   return permutation[currentIndex];
-
-// return random(0, numVoices); // simpler implementation
 }
 
-void selectRandomVoice() {
+void selectRandomVoice() { 
   int randomIndex = getRandomVoiceIndex();
   int randomVoice = AVAILABLE_VOICES_IN_DEVICE[randomIndex];
   selectedVoice = randomVoice;
@@ -249,16 +250,14 @@ void selectRandomVoice() {
 }
 
 void displayMeasurements(state_t s) {
-  // displayFloat("aX", s.Acc.X);
-  // displayFloat("aY", s.Acc.Y);
-  // displayFloat("aZ", s.Acc.Z);
-  // displayFloat("gX", s.Gyro.X);
-  // displayFloat("gY", s.Gyro.Y);
-  // displayFloat("gZ", s.Gyro.Z);
-  // displayFloat("aθ", angle.Acc.Y);
-  Serial.println("");
+  displayFloat("aX", s.Acc.X);
+  displayFloat("aY", s.Acc.Y);
+  displayFloat("aZ", s.Acc.Z);
+  displayFloat("gX", s.Gyro.X);
+  displayFloat("gY", s.Gyro.Y);
+  displayFloat("gZ", s.Gyro.Z);
+  displayFloat("aθ", angle.Acc.Y);
 }
-
 
 void checkShouldRecalibrateIMU() {
   // if idle (barely moved) for 30 seconds, recailbrate to remove angle drift errors
@@ -306,6 +305,7 @@ void calibrateImu() {
   if (!SERIAL_PLOTTER_ENABLED) {
     Serial.println("******* CALIBRATION OFFSET VALUES *******");
     displayMeasurements(offset);
+    Serial.println("");
     Serial.println("****************************");
   }
 }
@@ -336,36 +336,31 @@ void configureIMU() {
 }
 
 void displayFloat(char* label, float value, bool isLast) {
-  static char floatBuffer[12];
-  if (SERIAL_PLOTTER_ENABLED) {
-    Serial.print(label);
-    Serial.print(":");
-    Serial.print(value);
-    if (isLast)
-      Serial.println();
-    else
-      Serial.print(",");
-  } else if (DEBUG_PRINTS_ENABLED) {
-    dtostrf(value, 6, 2, floatBuffer);
-    Serial.print(" | ");
-    Serial.print(label);
-    Serial.print(": ");
-    Serial.print(floatBuffer);
-    if (isLast)
-      Serial.println();
-  }
+  Serial.print(label);
+  Serial.print(":");
+  Serial.print(value);
+  if (isLast)
+    Serial.println();
+  else
+    Serial.print(",");
 }
 
 void displayState() {
   if (SERIAL_PLOTTER_ENABLED || millis() - lastPrintPreviousTime > DISPLAY_INTERVAL_MS) {
     lastPrintPreviousTime = millis();
-    // displayFloat("r", roll);
     displayFloat("θ", pitch);
-    // displayFloat("y", yaw);
-    displayFloat("L", level * 10);
+    displayFloat("LV", level * 10);
     displayFloat("💲", progressBarValue);
     displayFloat("🔁", ((int)swingDirectionChange) * 30);
-    displayMeasurements(state);
+    displayFloat("🎵", selectedVoice * 10);
+    
+    if (VERBOSE){
+      displayFloat("r", roll);
+      displayFloat("y", yaw);
+      displayMeasurements(state);
+    } 
+    
+    Serial.println();
   }
 }
 
@@ -382,9 +377,9 @@ float readFloat() {
 
 void readImuData() {
   Wire.beginTransmission(MPU);
-  Wire.write(0x3B);  // Start with register 0x3B (ACCEL_XOUT_H)
+  Wire.write(0x3B); // Start with register 0x3B (ACCEL_XOUT_H)
   Wire.endTransmission(false);
-  Wire.requestFrom(MPU, 7 * 2, true);  // Read 14 registers total, each value is stored in 2 registers
+  Wire.requestFrom(MPU, 7 * 2, true); // Read 14 registers total, each value is stored in 2 registers
 
   // For a range of +-2g, we need to divide the raw values by 16384, according to the datasheet
   state.Acc.X = readFloat() / ACCEL_DIVISION_FACTOR;
@@ -523,6 +518,8 @@ void doReset() {
 
 void checkAndProcessReset() {
   if (playedMaxLevel) {
+    // wait for last sound to finish playing and reset. 
+    while (player.checkPlayState() == DY::PlayState::Playing);
     doReset();
   }
 
@@ -538,8 +535,6 @@ bool shouldPlaySound() {
     return false;
   if (!(swingDirectionChange == FORWARD || !shouldPlayOnForwardOnly && swingDirectionChange == BACKWARDS))
     return false;
-
-  // displayFloat("p", (float)(player.checkPlayState() == DY::PlayState::Playing) * 50);
   if (player.checkPlayState() == DY::PlayState::Playing)
     return false;
   return true;
@@ -578,12 +573,16 @@ int getLevelRandomPermutationIndex(int level) {
 
 void play(int voice, int level, int index, int speed) {
   static char path[30];
-  sprintf(path, "/%d/%d/%d/%d.wav", voice, level, index, speed);
+
+  if (SPEED_VARIATIONS_ENABLED)
+    sprintf(path, "/%d/%d/%d/%d.wav", voice, level, index, speed);
+  else
+    sprintf(path, "/%d/%d_%d.WAV", voice, level, index);
+
   player.playSpecifiedDevicePath(DY::Device::Sd, path);
 }
 
 void playSound() {
-
   level = floor(map(progressBarValue, 0, 100, 0, numLevelsForVoice - 1));
   if (!shouldPlaySound())
     return;
