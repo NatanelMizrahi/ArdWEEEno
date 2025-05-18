@@ -11,6 +11,7 @@
 #include <SoftwareSerial.h>
 #include <DYPlayerArduino.h>
 
+void doReset(bool changeVoice = true);
 void displayFloat(char* label, float value, bool last = false);
 void shuffle(int arr[], int length);
 
@@ -27,7 +28,6 @@ typedef struct {
 typedef struct {
   coords_t Acc;
   coords_t Gyro;
-  float speed;
 } state_t;
 
 typedef struct {
@@ -46,15 +46,19 @@ float PROGRESS_GAIN_FACTOR = 2.8;
 float PROGRESS_DECAY_LEVEL_EXP = 0.12;
 float D_PITCH_UPDATE_NOISE_THRESHOLD = 0.015;
 float VOLUME;
-float IDLE_PROGRESS_DELAY_MS = 5000.0;
-float RESET_PROGRESS_DELAY_MS = 12000.0;
+float POST_IDLE_PROGRESS_DELAY_MS = 5000.0;
+float POST_RESET_PROGRESS_DELAY_MS = 12000.0;
 float MIN_ANGLE_PROGRESS = 7.0;
+float MIN_ANGLE_IDLE_CHECK = 10.0;
 float shouldPlayOnForwardOnly = 1.0;
-float IS_IDLE_CHECK_INTERVAL_MS = 30000;
+float ON_IDLE_CALIBRATION_CHECK_INTERVAL_MS = 30000.0;
+float IS_IDLE_TEST_WINDOW_MS = 10000.0;
+
 
 // int AVAILABLE_VOICES_IN_DEVICE[1] = { 0 }; // Test params
 // int AVAILABLE_VOICES_IN_DEVICE[5] = { 1, 2, 3, 4, 5 }; // Swing 1 params 
-int AVAILABLE_VOICES_IN_DEVICE[5] = { 6, 7, 8, 9, 10 }; // Swing 2 params 
+// int AVAILABLE_VOICES_IN_DEVICE[6] = { 6, 7, 8, 9, 10, 11 }; // Swing 2 params 
+int AVAILABLE_VOICES_IN_DEVICE[11] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 }; // Swing 3 params 
 
 // Full configuration via Serial monitor: 
 // 0.55,0.53,2.8,0.12,4000.0,7.0,1.0,0.015,10000
@@ -65,28 +69,31 @@ int AVAILABLE_VOICES_IN_DEVICE[5] = { 6, 7, 8, 9, 10 }; // Swing 2 params
 // audio constants
 const int MAX_VOLUME = 30;
 const int NUM_PLAYBACK_SPEEDS = 3;
-const int NUM_VOICES = 11;
+const int NUM_VOICES = 12;
 const int MAX_LEVELS = 11;
+const int MAX_PLAYBACKS_PER_LEVEL = 27;
 
-const int NUM_LEVELS_PER_VOICE[NUM_VOICES] = { 9, 11, 10, 10, 9, 11, 9, 9, 8, 9, 9 };
+const int NUM_LEVELS_PER_VOICE[NUM_VOICES] = { 9, 10, 10, 9, 11, 10, 10, 11, 9, 9, 9, 10 };
 const int PLAYBACKS_PER_LEVEL[NUM_VOICES][MAX_LEVELS] = {
   { 5,  5,  5,  5,  5,  5,  5,  5,  5},         // [0] Tst (9)
-  {11, 15, 14, 11,  7,  8, 11,  5, 10,  4,  1}, // [1] BA (11)
+  {16, 13, 14, 13, 14, 19, 13, 21,  5,  1},     // [1] YB (10)
   { 8,  9,  6,  4,  6,  8,  8,  8, 10,  2},     // [2] AP (10)
-  { 8,  7,  9,  9,  8, 10,  9,  9,  5,  3},     // [3] MM (10)
-  {13, 14, 11,  8, 10,  9,  6,  4,  1},         // [4] MT (9)
-  {12, 11, 13, 18, 17, 14, 12, 10,  8, 12,  5}, // [5] AN (11)
-  {13, 12,  9,  7,  7,  7,  6,  7,  5},         // [6] NO (9)
-  {16, 13, 14, 13, 14, 19, 13, 21,  5},         // [7] YB (9)
-  {11, 15, 14, 14, 12, 11,  8,  4},             // [8] EH (8)
-  { 7,  8,  9,  8,  7,  7,  6,  3,  3},         // [9] NA (9)
-  {20, 15, 16, 15, 12,  7,  3,  4,  1}          // [10] JH (9)
+  {13, 14, 11,  8, 10,  9,  6,  4,  1},         // [3] MT (9)
+  {11, 15, 14, 11,  7,  8, 11,  5, 10,  4,  1}, // [4] BA (11)
+  {13, 12,  9,  7,  7,  7,  6,  7,  5,  1},     // [5] NO (10)
+  { 8,  7,  9,  9,  8, 10,  9,  9,  5,  3},     // [6] MM (10)
+  {12, 11, 13, 18, 17, 14, 12, 10,  8, 12,  5}, // [7] AN (11)
+  {20, 15, 16, 15, 12,  7,  3,  4,  1},         // [8] JH (9)
+  {11, 15, 14, 14, 12, 11,  8,  4,  1},         // [9] EH (9)
+  { 7,  8,  9,  8,  7,  7,  6,  3,  3},         // [10] NA (9)
+  {17, 18, 24, 23, 20, 18, 19, 18, 21, 10}      // [11] NN (10)
 };
 
-int selectedVoice, numLevelsForVoice;
+int selectedVoice, numLevelsForVoice, selectedPlayback;
 float currentVolume;
 int level;
 bool playedMaxLevel;
+bool playedAnySoundInCurrentVoice;
 
 state_t state, offset, angle;
 float progressBarValue;
@@ -96,7 +103,6 @@ float lastPrintPreviousTime;
 float temperature;
 
 // UX configuration
-float availableVoicesVector;
 const bool SHOULD_INCREASE_ACCEL_FULL_RANGE = true;
 const bool SHOULD_INCREASE_GYRO_FULL_RANGE = false;
 const bool SERIAL_PLOTTER_ENABLED = true;
@@ -119,8 +125,8 @@ const int GYRO_CONFIG_FULL_RANGE_VAL = 0x10;  // 1000deg/s full scale (default +
 const int ACCELEROMETER_UNCERTAINTY_STD_DEV_DEGREES = 3;
 const int GYRO_ERROR_STD_DEV_DEG_PER_SEC = 4;
 const int ANGLE_UNCERTAINTY_STD_DEV_DEGREES = 2;
-const float KALMAN_INITIAL_ANGLE_STATE = 0; // swing starts in a mostly leveled surface
-const float KALMAN_INITIAL_ANGLE_UNCERTAINTY = ANGLE_UNCERTAINTY_STD_DEV_DEGREES * ANGLE_UNCERTAINTY_STD_DEV_DEGREES;
+const float KALMAN_INITIAL_ANGLE_STATE = 0;                                                                            // swing starts in a mostly leveled surface
+const float KALMAN_INITIAL_ANGLE_UNCERTAINTY = ANGLE_UNCERTAINTY_STD_DEV_DEGREES * ANGLE_UNCERTAINTY_STD_DEV_DEGREES;  //
 
 kalman_t kalmanRoll = {
   KALMAN_INITIAL_ANGLE_STATE,
@@ -141,8 +147,10 @@ float dPitch, previousDPitch, previousPitch;
 
 bool playedInLevel;
 float resetTimeMs;
+
 float maxPitchAngle;
 long winTimeMs;
+float lastSwingTimeMs;
 
 enum direction_change_e {
   BACKWARDS = -1,
@@ -151,7 +159,6 @@ enum direction_change_e {
 } swingDirectionChange = NO_DIRECTION_CHANGE;
 
 bool passedMinPoint;
-bool isSwinging;
 
 float* configurableParameters[] = {
   &ANGLE_PROGRESS_GAIN,
@@ -159,17 +166,19 @@ float* configurableParameters[] = {
   &PROGRESS_GAIN_FACTOR,
   &PROGRESS_DECAY_LEVEL_EXP,
   &VOLUME,
-  &RESET_PROGRESS_DELAY_MS,
+  &POST_RESET_PROGRESS_DELAY_MS,
   &MIN_ANGLE_PROGRESS,
   &shouldPlayOnForwardOnly,
   &D_PITCH_UPDATE_NOISE_THRESHOLD,
-  &IS_IDLE_CHECK_INTERVAL_MS
+  &ON_IDLE_CALIBRATION_CHECK_INTERVAL_MS
 };
 
 void updateSwingDirection() {
   float currentTimeMs = millis();
   swingDirectionChange = NO_DIRECTION_CHANGE;
-  isSwinging = maxPitchAngle >= MIN_ANGLE_PROGRESS;
+
+  if (abs(pitch) >= MIN_ANGLE_IDLE_CHECK)
+    lastSwingTimeMs = currentTimeMs;  
 
   // calculate the pitch angle derivative using the time average value in the current time window vs the previous time window and the time delta between the windows.
   if (currentTimeMs - previousDerivativeUpdateTimeMs > DERIVATIVE_CALC_TIME_WINDOW_MS) {
@@ -271,9 +280,9 @@ void checkShouldRecalibrateIMU() {
   if (millis() >= nextSampleTimeMs) {
     if ((maxPitchInInterval - minPitchInInterval) < IS_IDLE_CHECK_MAX_ANGLE_DELTA) {
       calibrateImu();
-      doReset();
+      doReset(false);
     }
-    nextSampleTimeMs = millis() + IS_IDLE_CHECK_INTERVAL_MS;
+    nextSampleTimeMs = millis() + ON_IDLE_CALIBRATION_CHECK_INTERVAL_MS;
     maxPitchInInterval = pitch;
     minPitchInInterval = pitch;
   }
@@ -353,6 +362,7 @@ void displayState() {
     displayFloat("💲", progressBarValue);
     displayFloat("🔁", ((int)swingDirectionChange) * 30);
     displayFloat("🎵", selectedVoice * 10);
+    displayFloat("#", selectedPlayback * 10 + 5);
     
     if (VERBOSE){
       displayFloat("r", roll);
@@ -377,9 +387,9 @@ float readFloat() {
 
 void readImuData() {
   Wire.beginTransmission(MPU);
-  Wire.write(0x3B); // Start with register 0x3B (ACCEL_XOUT_H)
+  Wire.write(0x3B);  // Start with register 0x3B (ACCEL_XOUT_H)
   Wire.endTransmission(false);
-  Wire.requestFrom(MPU, 7 * 2, true); // Read 14 registers total, each value is stored in 2 registers
+  Wire.requestFrom(MPU, 7 * 2, true);  // Read 14 registers total, each value is stored in 2 registers
 
   // For a range of +-2g, we need to divide the raw values by 16384, according to the datasheet
   state.Acc.X = readFloat() / ACCEL_DIVISION_FACTOR;
@@ -491,6 +501,8 @@ void runProgressBarErrorCorrection() {
   }
 }
 
+// the progress rate is determined by 4 configurable parameters: ANGLE_PROGRESS_GAIN, PROGRESS_GAIN_FACTOR, PROGRESS_DECAY_RATE, PROGRESS_DECAY_LEVEL_EXP
+// the progress bar score $ formula is: new$ = $ + (|θ| ^ Gain) / GainFactor - (DecayRate + (1 + $) ^ DecayLevelExponent)
 void updateProgressBar() {
   if (!shouldUpdateProgress())
     return;
@@ -507,24 +519,34 @@ void updateProgressBar() {
   runProgressBarErrorCorrection();
 }
 
-
-void doReset() {
+void doReset(bool changeVoice){
   progressBarValue = 0;
   maxPitchAngle = 0;
   playedMaxLevel = false;
-  resetTimeMs = millis() + RESET_PROGRESS_DELAY_MS;
-  selectRandomVoice();
+  playedAnySoundInCurrentVoice = false;
+  resetTimeMs = millis() + POST_RESET_PROGRESS_DELAY_MS;
+  if (changeVoice)
+    selectRandomVoice();
 }
 
 void checkAndProcessReset() {
   if (playedMaxLevel) {
-    // wait for last sound to finish playing and reset. 
-    while (player.checkPlayState() == DY::PlayState::Playing);
+    // wait for last sound to finish playing and reset, with timout to prevent infinite loop
+    float timeout = millis() + 30 * 1000;
+    while (player.checkPlayState() == DY::PlayState::Playing && millis() < timeout) {
+      delay(100);  
+    }
     doReset();
+    return;
   }
 
-  if (!isSwinging) {
-    resetTimeMs = millis() + IDLE_PROGRESS_DELAY_MS;
+  // switch voice if no one is swinging for a while and current voice was played at least once 
+  float now = millis();
+  bool shouldResetOnIdle = playedAnySoundInCurrentVoice && (now - lastSwingTimeMs > IS_IDLE_TEST_WINDOW_MS);
+  if (shouldResetOnIdle) {
+    displayFloat("RESET", 20);
+    doReset();
+    resetTimeMs = now + POST_IDLE_PROGRESS_DELAY_MS;
   }
 }
 
@@ -551,24 +573,30 @@ void shuffle(int arr[], int length) {
 }
 
 // this function ensures all voices in each level are sampled before repeating for maximal variability
+// it randomized the sound order and keeps a bookmark of each level's played indexes 
 int getLevelRandomPermutationIndex(int level) {
-  static int permutation[25];
+  static bool isLevelRandomized[MAX_LEVELS];
+  static int soundPermutationByLevel[MAX_LEVELS][MAX_PLAYBACKS_PER_LEVEL];
+  static int indexByLevel[MAX_LEVELS];
   static int numLevelOptions;
-  static int currentIndex;
-  static int currentLevel = -1;
+  static int* permutation;
+  
+  permutation = soundPermutationByLevel[level];
+  numLevelOptions = PLAYBACKS_PER_LEVEL[selectedVoice][level];
+  indexByLevel[level]++;
 
-  currentIndex++;
-  if (level != currentLevel || currentIndex == numLevelOptions) {
+  if (!isLevelRandomized[level] || indexByLevel[level] == numLevelOptions) {
     numLevelOptions = PLAYBACKS_PER_LEVEL[selectedVoice][level];
     for (int i = 0; i < numLevelOptions; i++) {
       permutation[i] = i;
     }
     shuffle(permutation, numLevelOptions);
-    currentIndex = 0;
-    currentLevel = level;
+    indexByLevel[level] = 0;
+    isLevelRandomized[level] = true;
   }
 
-  return permutation[currentIndex];
+  int currentLevelIndex = indexByLevel[level];
+  return permutation[currentLevelIndex];
 }
 
 void play(int voice, int level, int index, int speed) {
@@ -589,7 +617,10 @@ void playSound() {
 
   int randomPlaybackIndex = getLevelRandomPermutationIndex(level);
   int randomSpeed = random(0, NUM_PLAYBACK_SPEEDS);
+  selectedPlayback = randomPlaybackIndex;
+  
   play(selectedVoice, level, randomPlaybackIndex, randomSpeed);
+  playedAnySoundInCurrentVoice = true;
   playedMaxLevel = (level == (numLevelsForVoice - 1));
 }
 
