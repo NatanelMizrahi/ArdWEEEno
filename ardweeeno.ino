@@ -259,7 +259,6 @@ void selectRandomVoice() {
   int randomVoice = AVAILABLE_VOICES_IN_DEVICE[randomIndex];
   selectedVoice = randomVoice;
   numLevelsForVoice = NUM_LEVELS_PER_VOICE[selectedVoice];
-  return randomVoice;
 }
 
 void displayMeasurements(state_t s) {
