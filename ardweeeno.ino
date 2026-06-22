@@ -98,8 +98,12 @@ bool playedAnySoundInCurrentVoice;
 state_t state, offset, angle;
 float progressBarValue;
 float roll = 0, pitch = 0, yaw = 0;
-float elapsedTimeSeconds, currentTime, previousTime;
-float lastPrintPreviousTime;
+float elapsedTimeSeconds;
+// NOTE: store raw millis() snapshots as unsigned long, not float - float's 24-bit
+// mantissa loses integer precision past ~4.66h of uptime, which would silently
+// degrade dt/idle-timing calculations during long-running sessions.
+unsigned long currentTime, previousTime;
+unsigned long lastPrintPreviousTime;
 float temperature;
 
 // UX configuration
@@ -140,17 +144,17 @@ kalman_t kalmanPitch = {
 // pitch angle derivative state variables
 const float DERIVATIVE_CALC_TIME_WINDOW_MS = 100.0;
 
-float previousDerivativeUpdateTimeMs;
+unsigned long previousDerivativeUpdateTimeMs;
 float previousWindowPitchAvg;
 float pitchSampleSum, pitchSampleCount;
 float dPitch, previousDPitch, previousPitch;
 
 bool playedInLevel;
-float resetTimeMs;
+unsigned long resetTimeMs;
 
 float maxPitchAngle;
-long winTimeMs;
-float lastSwingTimeMs;
+unsigned long winTimeMs;
+unsigned long lastSwingTimeMs;
 
 enum direction_change_e {
   BACKWARDS = -1,
@@ -174,15 +178,15 @@ float* configurableParameters[] = {
 };
 
 void updateSwingDirection() {
-  float currentTimeMs = millis();
+  unsigned long currentTimeMs = millis();
   swingDirectionChange = NO_DIRECTION_CHANGE;
 
   if (abs(pitch) >= MIN_ANGLE_IDLE_CHECK)
-    lastSwingTimeMs = currentTimeMs;  
+    lastSwingTimeMs = currentTimeMs;
 
   // calculate the pitch angle derivative using the time average value in the current time window vs the previous time window and the time delta between the windows.
   if (currentTimeMs - previousDerivativeUpdateTimeMs > DERIVATIVE_CALC_TIME_WINDOW_MS) {
-    float dt = currentTimeMs - previousDerivativeUpdateTimeMs;
+    float dt = currentTimeMs - previousDerivativeUpdateTimeMs;  // small delta - safe to widen to float
     previousDerivativeUpdateTimeMs = currentTimeMs;
     pitchSampleCount = (pitchSampleCount == 0) ? 1 : pitchSampleCount; // 0 div protection
     float currentWindowPitchAvg = pitchSampleSum / pitchSampleCount;
@@ -250,12 +254,11 @@ int getRandomVoiceIndex() {
   return permutation[currentIndex];
 }
 
-void selectRandomVoice() { 
+void selectRandomVoice() {
   int randomIndex = getRandomVoiceIndex();
   int randomVoice = AVAILABLE_VOICES_IN_DEVICE[randomIndex];
   selectedVoice = randomVoice;
   numLevelsForVoice = NUM_LEVELS_PER_VOICE[selectedVoice];
-  return randomVoice;
 }
 
 void displayMeasurements(state_t s) {
@@ -272,7 +275,7 @@ void checkShouldRecalibrateIMU() {
   // if idle (barely moved) for 30 seconds, recailbrate to remove angle drift errors
   const int IS_IDLE_CHECK_MAX_ANGLE_DELTA = 1.5;
   static float maxPitchInInterval, minPitchInInterval;
-  static long nextSampleTimeMs;
+  static unsigned long nextSampleTimeMs;
 
   maxPitchInInterval = max(maxPitchInInterval, pitch);
   minPitchInInterval = min(minPitchInInterval, pitch);
@@ -282,7 +285,7 @@ void checkShouldRecalibrateIMU() {
       calibrateImu();
       doReset(false);
     }
-    nextSampleTimeMs = millis() + ON_IDLE_CALIBRATION_CHECK_INTERVAL_MS;
+    nextSampleTimeMs = millis() + (unsigned long)ON_IDLE_CALIBRATION_CHECK_INTERVAL_MS;  // explicit cast avoids promoting millis() to float
     maxPitchInInterval = pitch;
     minPitchInInterval = pitch;
   }
@@ -376,6 +379,7 @@ void displayState() {
 
 void setup() {
   Serial.begin(9600);
+  randomSeed(analogRead(A0));  // seed once from an UNCONNECTED analog pin (A4/A5 are I2C SDA/SCL - do not use)
   configureIMU();
   configurePlayer();
   delay(20);
@@ -448,7 +452,7 @@ kalman_t kalmanFilter(
 void measureAngles() {
   previousTime = currentTime;
   currentTime = millis();
-  elapsedTimeSeconds = (currentTime - previousTime) / 1000;
+  elapsedTimeSeconds = (currentTime - previousTime) / 1000.0;  // force float division - both operands are now unsigned long
   readImuData();
 
   // Correct the accelerometer outputs with the calculated offset values
@@ -524,7 +528,7 @@ void doReset(bool changeVoice){
   maxPitchAngle = 0;
   playedMaxLevel = false;
   playedAnySoundInCurrentVoice = false;
-  resetTimeMs = millis() + POST_RESET_PROGRESS_DELAY_MS;
+  resetTimeMs = millis() + (unsigned long)POST_RESET_PROGRESS_DELAY_MS;  // explicit cast avoids promoting millis() to float
   if (changeVoice)
     selectRandomVoice();
 }
@@ -532,21 +536,21 @@ void doReset(bool changeVoice){
 void checkAndProcessReset() {
   if (playedMaxLevel) {
     // wait for last sound to finish playing and reset, with timout to prevent infinite loop
-    float timeout = millis() + 30 * 1000;
+    unsigned long timeout = millis() + 30000UL;
     while (player.checkPlayState() == DY::PlayState::Playing && millis() < timeout) {
-      delay(100);  
+      delay(100);
     }
     doReset();
     return;
   }
 
-  // switch voice if no one is swinging for a while and current voice was played at least once 
-  float now = millis();
+  // switch voice if no one is swinging for a while and current voice was played at least once
+  unsigned long now = millis();
   bool shouldResetOnIdle = playedAnySoundInCurrentVoice && (now - lastSwingTimeMs > IS_IDLE_TEST_WINDOW_MS);
   if (shouldResetOnIdle) {
     displayFloat("RESET", 20);
     doReset();
-    resetTimeMs = now + POST_IDLE_PROGRESS_DELAY_MS;
+    resetTimeMs = now + (unsigned long)POST_IDLE_PROGRESS_DELAY_MS;  // explicit cast avoids promoting `now` to float
   }
 }
 
@@ -563,7 +567,7 @@ bool shouldPlaySound() {
 }
 
 void shuffle(int arr[], int length) {
-  randomSeed(analogRead(5));  // Seed the random number generator with noise from an unconnected analog pin
+  // NOTE: the RNG is seeded once in setup(); do NOT reseed here (it would repeat permutations)
   for (int i = length - 1; i > 0; i--) {
     int j = random(0, i + 1);
     int temp = arr[i];
@@ -573,30 +577,37 @@ void shuffle(int arr[], int length) {
 }
 
 // this function ensures all voices in each level are sampled before repeating for maximal variability
-// it randomized the sound order and keeps a bookmark of each level's played indexes 
+// it randomizes the sound order and keeps a bookmark of each level's played indexes
 int getLevelRandomPermutationIndex(int level) {
-  static bool isLevelRandomized[MAX_LEVELS];
   static int soundPermutationByLevel[MAX_LEVELS][MAX_PLAYBACKS_PER_LEVEL];
   static int indexByLevel[MAX_LEVELS];
-  static int numLevelOptions;
-  static int* permutation;
-  
-  permutation = soundPermutationByLevel[level];
-  numLevelOptions = PLAYBACKS_PER_LEVEL[selectedVoice][level];
-  indexByLevel[level]++;
+  static int randomizedForVoice[MAX_LEVELS];  // which voice each cached permutation was built for (-1 = none)
 
-  if (!isLevelRandomized[level] || indexByLevel[level] == numLevelOptions) {
-    numLevelOptions = PLAYBACKS_PER_LEVEL[selectedVoice][level];
+  static bool initialized = false;
+  if (!initialized) {
+    for (int i = 0; i < MAX_LEVELS; i++)
+      randomizedForVoice[i] = -1;  // can't default-init to 0, since 0 is a valid voice index
+    initialized = true;
+  }
+
+  int numLevelOptions = PLAYBACKS_PER_LEVEL[selectedVoice][level];
+  if (numLevelOptions <= 0)
+    return 0;  // no playbacks defined for this voice/level
+
+  int* permutation = soundPermutationByLevel[level];
+
+  // reshuffle when the voice changed (cached permutation is stale) or the cycle is exhausted.
+  // use >= (not ==) so we still recover if indexByLevel ever overshoots numLevelOptions.
+  if (randomizedForVoice[level] != selectedVoice || indexByLevel[level] >= numLevelOptions) {
     for (int i = 0; i < numLevelOptions; i++) {
       permutation[i] = i;
     }
     shuffle(permutation, numLevelOptions);
     indexByLevel[level] = 0;
-    isLevelRandomized[level] = true;
+    randomizedForVoice[level] = selectedVoice;
   }
 
-  int currentLevelIndex = indexByLevel[level];
-  return permutation[currentLevelIndex];
+  return permutation[indexByLevel[level]++];
 }
 
 void play(int voice, int level, int index, int speed) {
