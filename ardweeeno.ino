@@ -376,6 +376,7 @@ void displayState() {
 
 void setup() {
   Serial.begin(9600);
+  randomSeed(analogRead(A0));  // seed once from an UNCONNECTED analog pin (A4/A5 are I2C SDA/SCL - do not use)
   configureIMU();
   configurePlayer();
   delay(20);
@@ -563,7 +564,7 @@ bool shouldPlaySound() {
 }
 
 void shuffle(int arr[], int length) {
-  randomSeed(analogRead(5));  // Seed the random number generator with noise from an unconnected analog pin
+  // NOTE: the RNG is seeded once in setup(); do NOT reseed here (it would repeat permutations)
   for (int i = length - 1; i > 0; i--) {
     int j = random(0, i + 1);
     int temp = arr[i];
@@ -573,30 +574,37 @@ void shuffle(int arr[], int length) {
 }
 
 // this function ensures all voices in each level are sampled before repeating for maximal variability
-// it randomized the sound order and keeps a bookmark of each level's played indexes 
+// it randomizes the sound order and keeps a bookmark of each level's played indexes
 int getLevelRandomPermutationIndex(int level) {
-  static bool isLevelRandomized[MAX_LEVELS];
   static int soundPermutationByLevel[MAX_LEVELS][MAX_PLAYBACKS_PER_LEVEL];
   static int indexByLevel[MAX_LEVELS];
-  static int numLevelOptions;
-  static int* permutation;
-  
-  permutation = soundPermutationByLevel[level];
-  numLevelOptions = PLAYBACKS_PER_LEVEL[selectedVoice][level];
-  indexByLevel[level]++;
+  static int randomizedForVoice[MAX_LEVELS];  // which voice each cached permutation was built for (-1 = none)
 
-  if (!isLevelRandomized[level] || indexByLevel[level] == numLevelOptions) {
-    numLevelOptions = PLAYBACKS_PER_LEVEL[selectedVoice][level];
+  static bool initialized = false;
+  if (!initialized) {
+    for (int i = 0; i < MAX_LEVELS; i++)
+      randomizedForVoice[i] = -1;  // can't default-init to 0, since 0 is a valid voice index
+    initialized = true;
+  }
+
+  int numLevelOptions = PLAYBACKS_PER_LEVEL[selectedVoice][level];
+  if (numLevelOptions <= 0)
+    return 0;  // no playbacks defined for this voice/level
+
+  int* permutation = soundPermutationByLevel[level];
+
+  // reshuffle when the voice changed (cached permutation is stale) or the cycle is exhausted.
+  // use >= (not ==) so we still recover if indexByLevel ever overshoots numLevelOptions.
+  if (randomizedForVoice[level] != selectedVoice || indexByLevel[level] >= numLevelOptions) {
     for (int i = 0; i < numLevelOptions; i++) {
       permutation[i] = i;
     }
     shuffle(permutation, numLevelOptions);
     indexByLevel[level] = 0;
-    isLevelRandomized[level] = true;
+    randomizedForVoice[level] = selectedVoice;
   }
 
-  int currentLevelIndex = indexByLevel[level];
-  return permutation[currentLevelIndex];
+  return permutation[indexByLevel[level]++];
 }
 
 void play(int voice, int level, int index, int speed) {
