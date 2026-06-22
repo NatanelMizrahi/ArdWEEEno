@@ -104,6 +104,7 @@ float elapsedTimeSeconds;
 // degrade dt/idle-timing calculations during long-running sessions.
 unsigned long currentTime, previousTime;
 unsigned long lastPrintPreviousTime;
+float temperature;
 
 // UX configuration
 const bool SHOULD_INCREASE_ACCEL_FULL_RANGE = true;
@@ -148,6 +149,7 @@ float previousWindowPitchAvg;
 float pitchSampleSum, pitchSampleCount;
 float dPitch, previousDPitch, previousPitch;
 
+bool playedInLevel;
 unsigned long resetTimeMs;
 
 float maxPitchAngle;
@@ -159,6 +161,8 @@ enum direction_change_e {
   NO_DIRECTION_CHANGE = 0,
   FORWARD = 1
 } swingDirectionChange = NO_DIRECTION_CHANGE;
+
+bool passedMinPoint;
 
 float* configurableParameters[] = {
   &ANGLE_PROGRESS_GAIN,
@@ -200,6 +204,7 @@ void updateSwingDirection() {
     if (previousDPitch > 0 && dPitch <= 0) {
       swingDirectionChange = BACKWARDS;
     }
+    passedMinPoint = (previousPitch <= 0 && pitch >= 0) || (previousPitch >= 0 && pitch <= 0);
 
     previousPitch = pitch;
     pitchSampleSum = 0;
@@ -254,6 +259,7 @@ void selectRandomVoice() {
   int randomVoice = AVAILABLE_VOICES_IN_DEVICE[randomIndex];
   selectedVoice = randomVoice;
   numLevelsForVoice = NUM_LEVELS_PER_VOICE[selectedVoice];
+  return randomVoice;
 }
 
 void displayMeasurements(state_t s) {
@@ -395,7 +401,7 @@ void readImuData() {
   state.Acc.Y = readFloat() / ACCEL_DIVISION_FACTOR;
   state.Acc.Z = readFloat() / ACCEL_DIVISION_FACTOR;
 
-  readFloat();  // discard temperature register - unused, but must read it to drain the I2C buffer in order
+  temperature = readFloat();
 
   // For a 250deg/s range we have to divide first the raw value by 131.0, according to the datasheet
   state.Gyro.X = readFloat() / GYRO_DIVISION_FACTOR;
