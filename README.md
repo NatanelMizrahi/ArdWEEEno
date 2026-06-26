@@ -11,3 +11,18 @@ Code for Arduino controlled audio emitting swings
 
 
 [Album link 👈](https://photos.app.goo.gl/XLQYSxPNwAZhtYaN8)
+
+## How it works
+
+The swing tracks pitch angle via a Kalman-filtered IMU. A progress bar fills as you swing — the harder and higher you swing, the faster it fills. As the bar rises through levels, escalating audio clips play from a voice assigned to that session.
+
+**Voices & levels:** Each voice has 8–11 levels. The higher the level, the more intense the audio. Reaching the top level ends the session and triggers a reset.
+
+**Voice rotation:** On reset (or after 10 seconds of idle with at least one sound played), a new voice is randomly selected. All voices are cycled through before any repeats.
+
+**Multi-unit setup:** Each physical unit is flashed with `SWING_INDEX` selecting its voice pool:
+- `0` — test unit (voice 0 only)
+- `1` / `2` — backup units (9 voices each, 50/50 split)
+- `3` — main unit (all 18 production voices)
+
+**Easter egg:** Hold the swing at 80°+ for 10 seconds to lock in a special voice for one session. It then returns to normal random rotation.
