@@ -59,7 +59,7 @@ float IS_IDLE_TEST_WINDOW_MS = 10000.0;
 //   0 = test unit (voice 0 only)
 //   1, 2 = backup units (50/50 split of all non-test voices)
 //   3 = main unit (all voices)
-#define SWING_INDEX 3
+#define SWING_INDEX 0
 
 #if SWING_INDEX == 0
 int AVAILABLE_VOICES_IN_DEVICE[] = { 0 }; // Test params
@@ -84,8 +84,8 @@ const int NUM_VOICES = 19;
 const int MAX_LEVELS = 11;
 const int MAX_PLAYBACKS_PER_LEVEL = 27;
 
-const int NUM_LEVELS_PER_VOICE[NUM_VOICES] = { 9, 10, 10, 9, 11, 10, 10, 11, 9, 9, 9, 10, 8, 9, 8, 8, 11, 10, 10 };
-const int PLAYBACKS_PER_LEVEL[NUM_VOICES][MAX_LEVELS] = {
+const int NUM_LEVELS_PER_VOICE[NUM_VOICES] PROGMEM = { 9, 10, 10, 9, 11, 10, 10, 11, 9, 9, 9, 10, 8, 9, 8, 8, 11, 10, 10 };
+const int PLAYBACKS_PER_LEVEL[NUM_VOICES][MAX_LEVELS] PROGMEM = {
   { 5,  5,  5,  5,  5,  5,  5,  5,  5},         // [0] Tst (9)
   {16, 13, 14, 13, 14, 19, 13, 21,  5,  1},     // [1] YB (10)
   { 8,  9,  6,  4,  6,  8,  8,  8, 10,  2},     // [2] AP (10)
@@ -282,7 +282,7 @@ void selectRandomVoice() {
   int randomIndex = getRandomVoiceIndex();
   int randomVoice = AVAILABLE_VOICES_IN_DEVICE[randomIndex];
   selectedVoice = randomVoice;
-  numLevelsForVoice = NUM_LEVELS_PER_VOICE[selectedVoice];
+  numLevelsForVoice = pgm_read_word(&NUM_LEVELS_PER_VOICE[selectedVoice]);
 }
 
 void displayMeasurements(state_t s) {
@@ -614,7 +614,7 @@ int getLevelRandomPermutationIndex(int level) {
     initialized = true;
   }
 
-  int numLevelOptions = PLAYBACKS_PER_LEVEL[selectedVoice][level];
+  int numLevelOptions = pgm_read_word(&PLAYBACKS_PER_LEVEL[selectedVoice][level]);
   if (numLevelOptions <= 0)
     return 0;  // no playbacks defined for this voice/level
 
@@ -665,7 +665,7 @@ void checkEasterEgg() {
       easterEggHoldStartMs = millis();
     else if (millis() - easterEggHoldStartMs >= EASTER_EGG_HOLD_MS) {
       selectedVoice = EASTER_EGG_VOICES[SWING_INDEX];
-      numLevelsForVoice = NUM_LEVELS_PER_VOICE[selectedVoice];
+      numLevelsForVoice = pgm_read_word(&NUM_LEVELS_PER_VOICE[selectedVoice]);
       easterEggHoldStartMs = 0;
       play(0, 0, 1, 0); // confirmation sound
       doReset(false);
