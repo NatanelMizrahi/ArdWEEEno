@@ -14,6 +14,7 @@
 void doReset(bool changeVoice = true);
 void displayFloat(char* label, float value, bool last = false);
 void shuffle(int arr[], int length);
+void shuffle(uint8_t arr[], int length);
 
 const int AUDIO_RX_PIN = 2;
 const int AUDIO_TX_PIN = 3;
@@ -82,7 +83,7 @@ const int MAX_VOLUME = 30;
 const int NUM_PLAYBACK_SPEEDS = 3;
 const int NUM_VOICES = 19;
 const int MAX_LEVELS = 11;
-const int MAX_PLAYBACKS_PER_LEVEL = 27;
+const int MAX_PLAYBACKS_PER_LEVEL = 24;
 
 const int NUM_LEVELS_PER_VOICE[NUM_VOICES] PROGMEM = { 9, 10, 10, 9, 11, 10, 10, 11, 9, 9, 9, 10, 8, 9, 8, 8, 11, 10, 10 };
 const int PLAYBACKS_PER_LEVEL[NUM_VOICES][MAX_LEVELS] PROGMEM = {
@@ -264,7 +265,7 @@ void configureSensitivity() {
 // Alternative simpler implementation: return random(0, numVoices);
 int getRandomVoiceIndex() {
   static int numVoices = sizeof(AVAILABLE_VOICES_IN_DEVICE) / sizeof(AVAILABLE_VOICES_IN_DEVICE[0]);
-  static int permutation[NUM_VOICES];
+  static uint8_t permutation[NUM_VOICES];
   static int currentIndex = numVoices;
   
   currentIndex++;
@@ -600,12 +601,21 @@ void shuffle(int arr[], int length) {
   }
 }
 
+void shuffle(uint8_t arr[], int length) {
+  for (int i = length - 1; i > 0; i--) {
+    int j = random(0, i + 1);
+    uint8_t temp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = temp;
+  }
+}
+
 // this function ensures all voices in each level are sampled before repeating for maximal variability
 // it randomizes the sound order and keeps a bookmark of each level's played indexes
 int getLevelRandomPermutationIndex(int level) {
-  static int soundPermutationByLevel[MAX_LEVELS][MAX_PLAYBACKS_PER_LEVEL];
-  static int indexByLevel[MAX_LEVELS];
-  static int randomizedForVoice[MAX_LEVELS];  // which voice each cached permutation was built for (-1 = none)
+  static uint8_t soundPermutationByLevel[MAX_LEVELS][MAX_PLAYBACKS_PER_LEVEL];
+  static uint8_t indexByLevel[MAX_LEVELS];
+  static int8_t randomizedForVoice[MAX_LEVELS];  // which voice each cached permutation was built for (-1 = none)
 
   static bool initialized = false;
   if (!initialized) {
