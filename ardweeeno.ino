@@ -126,7 +126,7 @@ unsigned long lastPrintPreviousTime;
 float temperature;
 
 // Easter egg: hold ~90° for 10s to lock in a specific voice
-const float EASTER_EGG_ANGLE_DEG = 85.0;
+const float EASTER_EGG_ANGLE_DEG = 80.0;
 const unsigned long EASTER_EGG_HOLD_MS = 10000;
 const int EASTER_EGG_VOICES[] = { 12, 12, 16, 12 }; // indexed by SWING_INDEX
 
