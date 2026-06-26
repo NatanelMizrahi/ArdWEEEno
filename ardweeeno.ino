@@ -526,8 +526,8 @@ bool shouldUpdateProgress() {
 }
 
 void runProgressBarErrorCorrection() {
-  // if stuck due to serial error, reset progress
-  if (progressBarValue == 100 && (millis() - winTimeMs) > 5000) {
+  // fallback: if stuck at 100 for >30s (e.g. audio module serial error), force reset
+  if (progressBarValue >= 100 && (millis() - winTimeMs) > 30000) {
     doReset();
   }
 }
@@ -537,17 +537,22 @@ void runProgressBarErrorCorrection() {
 void updateProgressBar() {
   if (!shouldUpdateProgress())
     return;
+  if (progressBarValue >= 100) {
+    runProgressBarErrorCorrection();
+    return; // hold at max until playedMaxLevel triggers reset
+  }
   float gain = pow(abs(pitch), ANGLE_PROGRESS_GAIN) / PROGRESS_GAIN_FACTOR;
   float decay = PROGRESS_DECAY_RATE + pow(1 + progressBarValue, PROGRESS_DECAY_LEVEL_EXP);
   float newValue = progressBarValue + gain - decay;
   newValue = constrain(newValue, 0.0, 100.0);
 
-  if (progressBarValue < 100 && newValue == 100) {
+  if (progressBarValue < 100 && newValue >= 100) {
+    progressBarValue = 100;
     winTimeMs = millis();
+    return;
   }
 
   progressBarValue = newValue;
-  runProgressBarErrorCorrection();
 }
 
 void doReset(bool changeVoice){
