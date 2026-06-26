@@ -128,7 +128,7 @@ float temperature;
 // Easter egg: hold ~90° for 10s to lock in a specific voice
 const float EASTER_EGG_ANGLE_DEG = 85.0;
 const unsigned long EASTER_EGG_HOLD_MS = 10000;
-const int EASTER_EGG_VOICES[] = { 0, 12, 16, 12 }; // indexed by SWING_INDEX
+const int EASTER_EGG_VOICES[] = { 12, 12, 16, 12 }; // indexed by SWING_INDEX
 
 // UX configuration
 const bool SHOULD_INCREASE_ACCEL_FULL_RANGE = true;
@@ -391,6 +391,8 @@ void displayState() {
     displayFloat("🔁", ((int)swingDirectionChange) * 30);
     displayFloat("🎵", selectedVoice * 10);
     displayFloat("#", selectedPlayback * 10 + 5);
+    float eggProgress = (easterEggHoldStartMs > 0) ? constrain((millis() - easterEggHoldStartMs) / (float)EASTER_EGG_HOLD_MS * 100.0, 0.0, 100.0) : 0.0;
+    displayFloat("🥚", eggProgress);
     
     if (VERBOSE){
       displayFloat("r", roll);
