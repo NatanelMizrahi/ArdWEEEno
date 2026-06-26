@@ -628,7 +628,7 @@ int getLevelRandomPermutationIndex(int level) {
   if (numLevelOptions <= 0)
     return 0;  // no playbacks defined for this voice/level
 
-  int* permutation = soundPermutationByLevel[level];
+  uint8_t* permutation = soundPermutationByLevel[level];
 
   // reshuffle when the voice changed (cached permutation is stale) or the cycle is exhausted.
   // use >= (not ==) so we still recover if indexByLevel ever overshoots numLevelOptions.
