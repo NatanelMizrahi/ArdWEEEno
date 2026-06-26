@@ -55,10 +55,21 @@ float ON_IDLE_CALIBRATION_CHECK_INTERVAL_MS = 30000.0;
 float IS_IDLE_TEST_WINDOW_MS = 10000.0;
 
 
-// int AVAILABLE_VOICES_IN_DEVICE[1] = { 0 }; // Test params
-// int AVAILABLE_VOICES_IN_DEVICE[5] = { 1, 2, 3, 4, 5 }; // Swing 1 params 
-// int AVAILABLE_VOICES_IN_DEVICE[6] = { 6, 7, 8, 9, 10, 11 }; // Swing 2 params 
-int AVAILABLE_VOICES_IN_DEVICE[11] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 }; // Swing 3 params 
+// Each physical unit is flashed with one active voice set, selected by SWING_INDEX:
+//   0 = test unit (voice 0 only)
+//   1, 2 = backup units (50/50 split of all non-test voices)
+//   3 = main unit (all voices)
+#define SWING_INDEX 3
+
+#if SWING_INDEX == 0
+int AVAILABLE_VOICES_IN_DEVICE[] = { 0 }; // Test params
+#elif SWING_INDEX == 1
+int AVAILABLE_VOICES_IN_DEVICE[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9 }; // Swing 1 (backup) params
+#elif SWING_INDEX == 2
+int AVAILABLE_VOICES_IN_DEVICE[] = { 10, 11, 12, 13, 14, 15, 16, 17, 18 }; // Swing 2 (backup) params
+#elif SWING_INDEX == 3
+int AVAILABLE_VOICES_IN_DEVICE[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 }; // Swing 3 (main) params
+#endif
 
 // Full configuration via Serial monitor: 
 // 0.55,0.53,2.8,0.12,4000.0,7.0,1.0,0.015,10000
@@ -69,11 +80,11 @@ int AVAILABLE_VOICES_IN_DEVICE[11] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 }; // S
 // audio constants
 const int MAX_VOLUME = 30;
 const int NUM_PLAYBACK_SPEEDS = 3;
-const int NUM_VOICES = 12;
+const int NUM_VOICES = 19;
 const int MAX_LEVELS = 11;
 const int MAX_PLAYBACKS_PER_LEVEL = 27;
 
-const int NUM_LEVELS_PER_VOICE[NUM_VOICES] = { 9, 10, 10, 9, 11, 10, 10, 11, 9, 9, 9, 10 };
+const int NUM_LEVELS_PER_VOICE[NUM_VOICES] = { 9, 10, 10, 9, 11, 10, 10, 11, 9, 9, 9, 10, 8, 9, 8, 8, 11, 10, 10 };
 const int PLAYBACKS_PER_LEVEL[NUM_VOICES][MAX_LEVELS] = {
   { 5,  5,  5,  5,  5,  5,  5,  5,  5},         // [0] Tst (9)
   {16, 13, 14, 13, 14, 19, 13, 21,  5,  1},     // [1] YB (10)
@@ -86,7 +97,14 @@ const int PLAYBACKS_PER_LEVEL[NUM_VOICES][MAX_LEVELS] = {
   {20, 15, 16, 15, 12,  7,  3,  4,  1},         // [8] JH (9)
   {11, 15, 14, 14, 12, 11,  8,  4,  1},         // [9] EH (9)
   { 7,  8,  9,  8,  7,  7,  6,  3,  3},         // [10] NA (9)
-  {17, 18, 24, 23, 20, 18, 19, 18, 21, 10}      // [11] NN (10)
+  {17, 18, 24, 23, 20, 18, 19, 18, 21, 10},     // [11] NN (10)
+  {10, 12, 13, 15, 13, 14, 12,  1},             // [12] FF (8)
+  { 5, 10, 12, 10, 11, 12, 13,  9,  3},         // [13] KW (9)
+  { 6,  9,  9,  8,  6,  5,  4,  1},             // [14] PL (8)
+  { 4,  5,  4,  7,  7,  6,  4,  3},             // [15] SS (8)
+  {12, 13,  8, 10, 12,  9, 14, 12,  9, 11,  4}, // [16] YR (11)
+  {10, 12, 12, 15, 16, 12, 11,  6,  7,  2},     // [17] MP (10)
+  { 6,  6,  5,  7,  7,  7,  8,  6,  5,  2}      // [18] SA (10)
 };
 
 int selectedVoice, numLevelsForVoice, selectedPlayback;
