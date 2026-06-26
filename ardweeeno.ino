@@ -124,6 +124,11 @@ unsigned long currentTime, previousTime;
 unsigned long lastPrintPreviousTime;
 float temperature;
 
+// Easter egg: hold ~90° for 10s to lock in a specific voice
+const float EASTER_EGG_ANGLE_DEG = 85.0;
+const unsigned long EASTER_EGG_HOLD_MS = 10000;
+const int EASTER_EGG_VOICES[] = { 0, 12, 16, 12 }; // indexed by SWING_INDEX
+
 // UX configuration
 const bool SHOULD_INCREASE_ACCEL_FULL_RANGE = true;
 const bool SHOULD_INCREASE_GYRO_FULL_RANGE = false;
@@ -169,6 +174,7 @@ float dPitch, previousDPitch, previousPitch;
 
 bool playedInLevel;
 unsigned long resetTimeMs;
+unsigned long easterEggHoldStartMs = 0;
 
 float maxPitchAngle;
 unsigned long winTimeMs;
@@ -653,9 +659,26 @@ void playSound() {
   playedMaxLevel = (level == (numLevelsForVoice - 1));
 }
 
+void checkEasterEgg() {
+  if (abs(pitch) >= EASTER_EGG_ANGLE_DEG) {
+    if (easterEggHoldStartMs == 0)
+      easterEggHoldStartMs = millis();
+    else if (millis() - easterEggHoldStartMs >= EASTER_EGG_HOLD_MS) {
+      selectedVoice = EASTER_EGG_VOICES[SWING_INDEX];
+      numLevelsForVoice = NUM_LEVELS_PER_VOICE[selectedVoice];
+      easterEggHoldStartMs = 0;
+      play(0, 0, 1, 0); // confirmation sound
+      doReset(false);
+    }
+  } else {
+    easterEggHoldStartMs = 0;
+  }
+}
+
 void loop() {
   readParameters();
   measureAngles();
+  checkEasterEgg();
   updateSwingDirection();
   updateProgressBar();
   displayState();
