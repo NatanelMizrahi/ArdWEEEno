@@ -657,7 +657,7 @@ void play(int voice, int level, int index, int speed) {
   if (SPEED_VARIATIONS_ENABLED)
     sprintf(path, "/%d/%d/%d/%d.wav", voice, level, index, speed);
   else
-    sprintf(path, "/%d/%d_%d.WAV", voice, level, index);
+    sprintf(path, "/%d/%d_%d.wav", voice, level, index);
 
   player.playSpecifiedDevicePath(DY::Device::Sd, path);
 }
