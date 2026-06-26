@@ -58,18 +58,18 @@ float IS_IDLE_TEST_WINDOW_MS = 10000.0;
 
 // Each physical unit is flashed with one active voice set, selected by SWING_INDEX:
 //   0 = test unit (voice 0 only)
-//   1, 2 = backup units (50/50 split of all non-test voices)
-//   3 = main unit (all voices)
-#define SWING_INDEX 0
+//   1, 2 = operational units (50/50 split of all non-test voices)
+//   3 = backup unit (all voices)
+#define SWING_INDEX 2
 
 #if SWING_INDEX == 0
 int AVAILABLE_VOICES_IN_DEVICE[] = { 0 }; // Test params
 #elif SWING_INDEX == 1
-int AVAILABLE_VOICES_IN_DEVICE[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9 }; // Swing 1 (backup) params
+int AVAILABLE_VOICES_IN_DEVICE[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9 }; // Swing 1 (operational) params
 #elif SWING_INDEX == 2
-int AVAILABLE_VOICES_IN_DEVICE[] = { 10, 11, 12, 13, 14, 15, 16, 17, 18 }; // Swing 2 (backup) params
+int AVAILABLE_VOICES_IN_DEVICE[] = { 10, 11, 12, 13, 14, 15, 16, 17, 18 }; // Swing 2 (operational) params
 #elif SWING_INDEX == 3
-int AVAILABLE_VOICES_IN_DEVICE[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 }; // Swing 3 (main) params
+int AVAILABLE_VOICES_IN_DEVICE[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 }; // Swing 3 (backup) params
 #endif
 
 // Full configuration via Serial monitor: 

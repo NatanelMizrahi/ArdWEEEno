@@ -22,7 +22,7 @@ The swing tracks pitch angle via a Kalman-filtered IMU. A progress bar fills as 
 
 **Multi-unit setup:** Each physical unit is flashed with `SWING_INDEX` selecting its voice pool:
 - `0` — test unit (voice 0 only)
-- `1` / `2` — backup units (9 voices each, 50/50 split)
-- `3` — main unit (all 18 production voices)
+- `1` / `2` — operational units (9 voices each, 50/50 split)
+- `3` — backup unit (all 18 production voices)
 
 **Easter egg:** Hold the swing at 80°+ for 10 seconds to lock in a special voice for one session. It then returns to normal random rotation.
