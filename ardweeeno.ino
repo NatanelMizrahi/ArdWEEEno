@@ -60,7 +60,7 @@ float IS_IDLE_TEST_WINDOW_MS = 10000.0;
 //   0 = test unit (voice 0 only)
 //   1, 2 = operational units (50/50 split of all non-test voices)
 //   3 = backup unit (all voices)
-#define SWING_INDEX 2
+#define SWING_INDEX 1
 
 #if SWING_INDEX == 0
 int AVAILABLE_VOICES_IN_DEVICE[] = { 0 }; // Test params
@@ -128,7 +128,7 @@ float temperature;
 // Easter egg: hold ~90° for 10s to lock in a specific voice
 const float EASTER_EGG_ANGLE_DEG = 80.0;
 const unsigned long EASTER_EGG_HOLD_MS = 10000;
-const int EASTER_EGG_VOICES[] = { 12, 12, 16, 12 }; // indexed by SWING_INDEX
+const int EASTER_EGG_VOICES[] = { 12, 12, 17, 12 }; // indexed by SWING_INDEX
 
 // UX configuration
 const bool SHOULD_INCREASE_ACCEL_FULL_RANGE = true;
@@ -296,21 +296,29 @@ void displayMeasurements(state_t s) {
   displayFloat("aθ", angle.Acc.Y);
 }
 
+void resetKalman() {
+  kalmanRoll  = { KALMAN_INITIAL_ANGLE_STATE, KALMAN_INITIAL_ANGLE_UNCERTAINTY };
+  kalmanPitch = { KALMAN_INITIAL_ANGLE_STATE, KALMAN_INITIAL_ANGLE_UNCERTAINTY };
+}
+
 void checkShouldRecalibrateIMU() {
   // if idle (barely moved) for 30 seconds, recailbrate to remove angle drift errors
   const int IS_IDLE_CHECK_MAX_ANGLE_DELTA = 1.5;
   static float maxPitchInInterval, minPitchInInterval;
   static unsigned long nextSampleTimeMs;
 
-  maxPitchInInterval = max(maxPitchInInterval, pitch);
-  minPitchInInterval = min(minPitchInInterval, pitch);
+  if (!isnan(pitch)) {  // guard: NaN < threshold is always false, blocking recalibration forever
+    maxPitchInInterval = max(maxPitchInInterval, pitch);
+    minPitchInInterval = min(minPitchInInterval, pitch);
+  }
 
   if (millis() >= nextSampleTimeMs) {
-    if ((maxPitchInInterval - minPitchInInterval) < IS_IDLE_CHECK_MAX_ANGLE_DELTA) {
+    if (isnan(pitch) || (maxPitchInInterval - minPitchInInterval) < IS_IDLE_CHECK_MAX_ANGLE_DELTA) {
       calibrateImu();
+      resetKalman();  // recalibration must also reset filter state or NaN propagates forever
       doReset(false);
     }
-    nextSampleTimeMs = millis() + (unsigned long)ON_IDLE_CALIBRATION_CHECK_INTERVAL_MS;  // explicit cast avoids promoting millis() to float
+    nextSampleTimeMs = millis() + (unsigned long)ON_IDLE_CALIBRATION_CHECK_INTERVAL_MS;
     maxPitchInInterval = pitch;
     minPitchInInterval = pitch;
   }
@@ -322,9 +330,13 @@ void calibrateImu() {
   for (int i = 0; i < CALIBRATION_SAMPLE_SIZE; i++) {
     readImuData();
 
+    float denomX = sqrt(pow(state.Acc.X, 2) + pow(state.Acc.Z, 2));
+    float denomY = sqrt(pow(state.Acc.Y, 2) + pow(state.Acc.Z, 2));
+    if (denomX == 0 || denomY == 0) { i--; continue; }  // skip bad I2C read, retry sample
+
     // Sum all readings
-    offset.Acc.X = offset.Acc.X + ((atan((state.Acc.Y) / sqrt(pow((state.Acc.X), 2) + pow((state.Acc.Z), 2))) * 180 / PI));
-    offset.Acc.Y = offset.Acc.Y + ((atan(-1 * (state.Acc.X) / sqrt(pow((state.Acc.Y), 2) + pow((state.Acc.Z), 2))) * 180 / PI));
+    offset.Acc.X = offset.Acc.X + ((atan((state.Acc.Y) / denomX) * 180 / PI));
+    offset.Acc.Y = offset.Acc.Y + ((atan(-1 * (state.Acc.X) / denomY) * 180 / PI));
 
     offset.Gyro.X = offset.Gyro.X + state.Gyro.X;
     offset.Gyro.Y = offset.Gyro.Y + state.Gyro.Y;
@@ -489,8 +501,11 @@ void measureAngles() {
   // state.Acc.Z = state.Acc.Z - offset.Acc.Z;
 
   // Calculating Roll and Pitch from the accelerometer data with the calculated offset values
-  angle.Acc.X = (atan(state.Acc.Y / sqrt(pow(state.Acc.X, 2) + pow(state.Acc.Z, 2))) * 180 / PI) - offset.Acc.X;
-  angle.Acc.Y = (atan(-1 * state.Acc.X / sqrt(pow(state.Acc.Y, 2) + pow(state.Acc.Z, 2))) * 180 / PI) - offset.Acc.Y;
+  float denomX = sqrt(pow(state.Acc.X, 2) + pow(state.Acc.Z, 2));
+  float denomY = sqrt(pow(state.Acc.Y, 2) + pow(state.Acc.Z, 2));
+  if (denomX == 0 || denomY == 0) return;  // skip bad I2C read, keep previous pitch/roll
+  angle.Acc.X = (atan(state.Acc.Y / denomX) * 180 / PI) - offset.Acc.X;
+  angle.Acc.Y = (atan(-1 * state.Acc.X / denomY) * 180 / PI) - offset.Acc.Y;
 
   // Correct the gyro outputs with the calculated offset values
   state.Gyro.X = state.Gyro.X - offset.Gyro.X;
