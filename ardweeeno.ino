@@ -459,6 +459,7 @@ void readParameters() {
   char delimiter;
 
   for (int i = 0; i < numParams; i++) {
+    wdt_reset();
     newValue = Serial.parseFloat();
     *configurableParameters[i] = newValue;
     delimiter = Serial.read();
