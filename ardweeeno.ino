@@ -315,6 +315,7 @@ void checkShouldRecalibrateIMU() {
 
   if (millis() >= nextSampleTimeMs) {
     if (isnan(pitch) || (maxPitchInInterval - minPitchInInterval) < IS_IDLE_CHECK_MAX_ANGLE_DELTA) {
+      displayFloat("RECAL", 20);
       calibrateImu();
       resetKalman();  // recalibration must also reset filter state or NaN propagates forever
       doReset(false);
