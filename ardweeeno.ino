@@ -10,6 +10,7 @@
 #include <Wire.h>
 #include <SoftwareSerial.h>
 #include <DYPlayerArduino.h>
+#include <avr/wdt.h>
 
 void doReset(bool changeVoice = true);
 void displayFloat(char* label, float value, bool last = false);
@@ -332,7 +333,7 @@ void calibrateImu() {
 
     float denomX = sqrt(pow(state.Acc.X, 2) + pow(state.Acc.Z, 2));
     float denomY = sqrt(pow(state.Acc.Y, 2) + pow(state.Acc.Z, 2));
-    if (denomX == 0 || denomY == 0) { i--; continue; }  // skip bad I2C read, retry sample
+    if (denomX == 0 || denomY == 0) { i--; wdt_reset(); continue; }  // skip bad I2C read, retry sample
 
     // Sum all readings
     offset.Acc.X = offset.Acc.X + ((atan((state.Acc.Y) / denomX) * 180 / PI));
@@ -417,11 +418,13 @@ void displayState() {
 }
 
 void setup() {
+  wdt_disable();  // disable first — old bootloader leaves WDT armed after a WDT reset, causing a reset loop
   Serial.begin(9600);
   randomSeed(analogRead(A0));  // seed once from an UNCONNECTED analog pin (A4/A5 are I2C SDA/SCL - do not use)
   configureIMU();
   configurePlayer();
   delay(20);
+  wdt_enable(WDTO_8S);
 }
 
 float readFloat() {
@@ -586,6 +589,7 @@ void checkAndProcessReset() {
     unsigned long timeout = millis() + 30000UL;
     while (player.checkPlayState() == DY::PlayState::Playing && millis() < timeout) {
       delay(100);
+      wdt_reset();
     }
     doReset();
     return;
@@ -708,6 +712,7 @@ void checkEasterEgg() {
 }
 
 void loop() {
+  wdt_reset();
   readParameters();
   measureAngles();
   checkEasterEgg();
